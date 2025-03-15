@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
-import { socket } from '../utils/socket';
+import socket from '../utils/socket';
 
 export default function TestNotifications() {
   const { user } = useAuth();

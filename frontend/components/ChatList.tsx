@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { getUserChats } from '../utils/chat';
 import Link from 'next/link';
 
 interface Chat {
@@ -34,8 +33,9 @@ const ChatList: React.FC<ChatListProps> = ({ users, onSelectChat, selectedChatId
       
       setLoading(true);
       try {
-        const fetchedChats = await getUserChats(user.id);
-        setChats(fetchedChats);
+        // For now, we'll use mock data since we don't have an endpoint to get all chats
+        // In a real application, you would fetch this from an API
+        setChats([]);
       } catch (error) {
         console.error('Error loading chats:', error);
       } finally {

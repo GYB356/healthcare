@@ -44,9 +44,14 @@ export default function Layout({ children }: LayoutProps) {
                   <>
                     <Notifications />
                     {process.env.NODE_ENV === 'development' && (
-                      <Link href="/test-notifications">
-                        <a className="text-yellow-500 hover:underline">Test Notifications</a>
-                      </Link>
+                      <>
+                        <Link href="/test-notifications">
+                          <a className="text-yellow-500 hover:underline">Test Notifications</a>
+                        </Link>
+                        <Link href="/chat-test">
+                          <a className="text-yellow-500 hover:underline">Test Chat</a>
+                        </Link>
+                      </>
                     )}
                   </>
                 )}

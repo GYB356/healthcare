@@ -3,7 +3,7 @@ import { useRouter } from "next/router";
 import "../styles/globals.css";
 import { AuthProvider, useAuth } from "../context/AuthContext";
 import Layout from "../components/Layout";
-import { socket, connectSocket, disconnectSocket } from "../utils/socket";
+import socket from "../utils/socket";
 
 const protectedRoutes = ["/dashboard", "/patients", "/reports", "/appointments", "/my-prescriptions", "/projects"];
 
@@ -20,10 +20,12 @@ function AppContent({ Component, pageProps }) {
   // Handle socket connection based on authentication state
   useEffect(() => {
     if (user) {
-      connectSocket(user.id);
+      // Join a room with the user's ID for receiving notifications
+      socket.emit('joinRoom', user.id);
+      console.log(`User joined room: ${user.id}`);
       
       return () => {
-        disconnectSocket();
+        // No need to disconnect, socket will handle reconnection automatically
       };
     }
   }, [user]);

@@ -1,190 +1,154 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { socket } from '../utils/socket';
-import { 
-  joinChat, 
-  sendMessage, 
-  getChatMessages, 
-  markMessagesAsRead,
-  decryptMessage
-} from '../utils/chat';
+import { useEffect, useState } from "react";
+import socket from "../utils/socket";
+import CryptoJS from "crypto-js";
 
-interface ChatProps {
-  chatId: string;
-  receiverId: string;
-  receiverName: string;
-}
+const SECRET_KEY = "supersecretkey"; // Store securely
 
-interface Message {
-  _id: string;
-  senderId: string;
-  receiverId: string;
-  message: string;
-  createdAt: string;
-  read: boolean;
-}
-
-const Chat: React.FC<ChatProps> = ({ chatId, receiverId, receiverName }) => {
-  const { user } = useAuth();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [newMessage, setNewMessage] = useState('');
+export default function Chat({ chatId, userId }) {
+  const [messages, setMessages] = useState([]);
+  const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState(null);
 
-  // Load initial messages
+  // Load existing messages and join chat
   useEffect(() => {
-    const loadMessages = async () => {
-      if (!chatId) return;
-      
-      setLoading(true);
-      try {
-        const fetchedMessages = await getChatMessages(chatId);
-        setMessages(fetchedMessages);
-        
-        // Mark messages as read
-        if (user?.id) {
-          await markMessagesAsRead(chatId, user.id);
+    setLoading(true);
+    setError(null);
+    
+    // Join the chat room
+    socket.emit("joinChat", chatId);
+    
+    // Initialize chat by fetching or creating it
+    fetch(`/api/chat/test/${chatId}?userId=${userId}`)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Failed to initialize chat');
         }
-      } catch (error) {
-        console.error('Error loading messages:', error);
-      } finally {
+        return response.json();
+      })
+      .then(() => {
+        // Load existing messages
+        return fetch(`/api/chat/${chatId}/messages`);
+      })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Failed to load messages');
+        }
+        return response.json();
+      })
+      .then(data => {
+        setMessages(data);
         setLoading(false);
-      }
-    };
-    
-    loadMessages();
-  }, [chatId, user?.id]);
+      })
+      .catch(err => {
+        console.error("Error loading chat:", err);
+        setError(err.message);
+        setLoading(false);
+      });
 
-  // Join chat room
-  useEffect(() => {
-    if (chatId) {
-      joinChat(chatId);
-    }
-    
     // Listen for new messages
-    socket.on('receiveMessage', (data) => {
-      const { id, senderId, message, createdAt } = data;
-      
-      // Add new message to state
-      setMessages(prev => [
-        ...prev,
-        {
-          _id: id,
-          senderId,
-          receiverId: user?.id || '',
-          message,
-          createdAt,
-          read: false
-        }
-      ]);
-      
-      // Mark message as read if it's for the current user
-      if (user?.id && senderId !== user.id) {
-        markMessagesAsRead(chatId, user.id);
+    socket.on("receiveMessage", (msg) => {
+      try {
+        const decryptedMessage = CryptoJS.AES.decrypt(msg.message, SECRET_KEY).toString(CryptoJS.enc.Utf8);
+        setMessages((prev) => [...prev, { 
+          senderId: msg.senderId, 
+          message: decryptedMessage,
+          createdAt: msg.createdAt || new Date()
+        }]);
+      } catch (error) {
+        console.error("Error decrypting message:", error);
       }
     });
-    
+
     return () => {
-      socket.off('receiveMessage');
+      socket.off("receiveMessage");
     };
-  }, [chatId, user?.id]);
+  }, [chatId, userId]);
 
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  // Send a new message
-  const handleSendMessage = (e: React.FormEvent) => {
-    e.preventDefault();
+  const sendMessage = () => {
+    if (!message.trim()) return;
     
-    if (!newMessage.trim() || !user?.id || !chatId || !receiverId) return;
-    
-    sendMessage(chatId, user.id, receiverId, newMessage);
-    setNewMessage('');
+    try {
+      const encryptedMessage = CryptoJS.AES.encrypt(message, SECRET_KEY).toString();
+      socket.emit("sendMessage", { 
+        chatId, 
+        senderId: userId, 
+        receiverId: "test-user", // In a real app, this would be the other participant
+        message: encryptedMessage 
+      });
+      
+      // Optimistically add message to UI
+      setMessages(prev => [...prev, { 
+        senderId: userId, 
+        message: message,
+        createdAt: new Date(),
+        pending: true
+      }]);
+      
+      setMessage("");
+    } catch (error) {
+      console.error("Error sending message:", error);
+      alert("Failed to send message. Please try again.");
+    }
   };
 
-  // Format timestamp
-  const formatTime = (timestamp: string) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
   };
+
+  if (loading) {
+    return <div className="flex justify-center items-center h-full">Loading chat...</div>;
+  }
+
+  if (error) {
+    return <div className="text-red-500 p-4">Error: {error}</div>;
+  }
 
   return (
     <div className="flex flex-col h-full">
-      {/* Chat header */}
-      <div className="bg-blue-600 text-white p-4 flex items-center">
-        <div className="w-10 h-10 rounded-full bg-blue-400 flex items-center justify-center mr-3">
-          {receiverName.charAt(0).toUpperCase()}
-        </div>
-        <h2 className="text-lg font-semibold">{receiverName}</h2>
-      </div>
-      
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {loading ? (
-          <div className="flex justify-center items-center h-full">
-            <p>Loading messages...</p>
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="flex justify-center items-center h-full text-gray-500">
-            <p>No messages yet. Start the conversation!</p>
-          </div>
+      <div className="flex-grow overflow-y-auto p-4 space-y-2">
+        {messages.length === 0 ? (
+          <div className="text-center text-gray-500 py-4">No messages yet. Start the conversation!</div>
         ) : (
-          messages.map((msg) => {
-            const isCurrentUser = msg.senderId === user?.id;
-            const decryptedMessage = decryptMessage(msg.message);
-            
-            return (
-              <div 
-                key={msg._id}
-                className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
-              >
-                <div 
-                  className={`max-w-xs md:max-w-md rounded-lg p-3 ${
-                    isCurrentUser 
-                      ? 'bg-blue-500 text-white rounded-br-none' 
-                      : 'bg-gray-200 text-gray-800 rounded-bl-none'
-                  }`}
-                >
-                  <p>{decryptedMessage}</p>
-                  <p className={`text-xs mt-1 ${isCurrentUser ? 'text-blue-100' : 'text-gray-500'}`}>
-                    {formatTime(msg.createdAt)}
-                    {isCurrentUser && (
-                      <span className="ml-2">
-                        {msg.read ? '✓✓' : '✓'}
-                      </span>
-                    )}
-                  </p>
-                </div>
+          messages.map((msg, index) => (
+            <div 
+              key={index} 
+              className={`p-2 rounded-lg max-w-[80%] ${
+                msg.senderId === userId 
+                  ? "ml-auto bg-blue-500 text-white" 
+                  : "mr-auto bg-gray-200 text-gray-800"
+              } ${msg.pending ? "opacity-70" : ""}`}
+            >
+              <div>{msg.message}</div>
+              <div className="text-xs opacity-70 text-right">
+                {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString() : ""}
               </div>
-            );
-          })
+            </div>
+          ))
         )}
-        <div ref={messagesEndRef} />
       </div>
-      
-      {/* Message input */}
-      <form onSubmit={handleSendMessage} className="border-t p-4">
+      <div className="border-t p-2">
         <div className="flex">
-          <input
-            type="text"
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
+          <textarea
+            className="flex-grow p-2 border rounded-md"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyPress={handleKeyPress}
             placeholder="Type a message..."
-            className="flex-1 border rounded-l-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            rows={2}
           />
-          <button
-            type="submit"
-            disabled={!newMessage.trim()}
-            className="bg-blue-500 text-white px-4 py-2 rounded-r-lg disabled:bg-blue-300"
+          <button 
+            className="ml-2 bg-blue-500 text-white p-2 rounded-md self-end"
+            onClick={sendMessage}
+            disabled={!message.trim()}
           >
             Send
           </button>
         </div>
-      </form>
+      </div>
     </div>
   );
-};
-
-export default Chat; 
+}

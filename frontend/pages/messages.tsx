@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import ChatList from '../components/ChatList';
 import Chat from '../components/Chat';
-import { getOrCreateChat } from '../utils/chat';
+import { createChat } from '../utils/chat';
 
 interface User {
   id: string;
@@ -45,7 +45,7 @@ export default function Messages() {
     if (chatId === 'new' && user?.id) {
       try {
         // Create a new chat
-        const newChat = await getOrCreateChat(user.id, receiverId);
+        const newChat = await createChat(user.id, receiverId);
         setSelectedChat({
           chatId: newChat._id,
           receiverId,

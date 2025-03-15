@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { socket, connectSocket } from "../utils/socket";
+import socket from "../utils/socket";
 import { useAuth } from "../context/AuthContext";
 
 interface Notification {
@@ -18,9 +18,6 @@ export default function Notifications() {
 
   useEffect(() => {
     if (!user || !user.id) return;
-
-    // Connect to socket and join user's room
-    connectSocket(user.id);
 
     // Listen for new notifications
     socket.on("newNotification", (notification: Notification) => {

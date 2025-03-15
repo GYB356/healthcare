@@ -1,4 +1,4 @@
-import { socket } from './socket';
+import socket from './socket';
 import CryptoJS from 'crypto-js';
 
 // Secret key for message encryption/decryption (should match the one in server)
@@ -48,6 +48,44 @@ export const decryptMessage = (encryptedMessage: string): string => {
   }
 };
 
+// Create a new chat between two users
+export const createChat = async (user1: string, user2: string): Promise<any> => {
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ user1, user2 }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to create chat');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error creating chat:', error);
+    throw error;
+  }
+};
+
+// Get messages for a chat
+export const getChatMessages = async (chatId: string): Promise<any[]> => {
+  try {
+    const response = await fetch(`/api/chat/${chatId}/messages`);
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch messages');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching messages:', error);
+    return [];
+  }
+};
+
 // Get or create a chat between two users
 export const getOrCreateChat = async (userId1: string, userId2: string): Promise<any> => {
   try {
@@ -82,31 +120,6 @@ export const getUserChats = async (userId: string): Promise<any[]> => {
     return await response.json();
   } catch (error) {
     console.error('Error fetching chats:', error);
-    return [];
-  }
-};
-
-// Get messages for a chat
-export const getChatMessages = async (
-  chatId: string,
-  limit: number = 50,
-  before?: string
-): Promise<any[]> => {
-  try {
-    let url = `/api/chat/messages/${chatId}?limit=${limit}`;
-    if (before) {
-      url += `&before=${before}`;
-    }
-
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch messages');
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('Error fetching messages:', error);
     return [];
   }
 };
