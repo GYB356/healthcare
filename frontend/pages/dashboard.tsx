@@ -3,6 +3,7 @@ import { AuthContext } from "../context/AuthContext";
 import axios from "axios";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import Notifications from "../components/Notifications";
+import Chat from "../components/Chat";
 
 export default function Dashboard() {
   const { user, logout } = useContext(AuthContext);
@@ -94,6 +95,14 @@ export default function Dashboard() {
             <Bar dataKey="value" fill="#8884d8" />
           </BarChart>
         </ResponsiveContainer>
+      </div>
+
+      {/* Chat Component */}
+      <div className="mt-8 p-4 bg-white shadow-lg rounded-lg">
+        <h3 className="text-xl font-bold mb-4">Support Chat</h3>
+        <div className="h-[400px]">
+          <Chat chatId="chat123" userId={user?.id || "user456"} />
+        </div>
       </div>
 
       <button
