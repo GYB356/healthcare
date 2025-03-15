@@ -1,6 +1,7 @@
 import express from "express";
 import Appointment from "../models/Appointment";
 import { authenticate, authorizeRoles } from "../middleware/authMiddleware";
+import { io } from "../server"; // Import WebSocket instance
 
 const router = express.Router();
 
@@ -10,6 +11,15 @@ router.post("/", authenticate, async (req, res) => {
     const { patientId, date, time, doctor, status } = req.body;
     const appointment = new Appointment({ patientId, date, time, doctor, status });
     await appointment.save();
+
+    // Notify the doctor
+    io.to(doctor).emit("newNotification", {
+      type: "appointment",
+      message: `New appointment booked by ${req.user.name}.`,
+      appointmentId: appointment._id,
+      timestamp: new Date()
+    });
+
     res.json({ message: "Appointment created", appointment });
   } catch (error) {
     res.status(500).json({ message: "Server error" });
@@ -57,6 +67,14 @@ router.post("/book", authenticate, authorizeRoles(["patient"]), async (req, res)
       date,
       notes,
       status: "pending",
+    });
+
+    // Notify the doctor about the new appointment
+    io.to(doctorId).emit("newNotification", {
+      type: "appointment",
+      message: `New appointment booked by ${req.user.name} for ${new Date(date).toLocaleDateString()}.`,
+      appointmentId: appointment._id,
+      timestamp: new Date()
     });
 
     res.status(201).json({ message: "Appointment request sent", appointment });

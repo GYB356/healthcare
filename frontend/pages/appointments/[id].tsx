@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import VideoCall from '../../components/VideoCall';
 import Layout from '../../components/Layout';
 import ConsultationReport from '../../components/ConsultationReport';
+import CreatePrescription from '../../components/CreatePrescription';
 
 interface Appointment {
   id: string;
@@ -26,6 +27,7 @@ export default function AppointmentDetails() {
   const [showVideoCall, setShowVideoCall] = useState(false);
   const [transcript, setTranscript] = useState<string>('');
   const [callEnded, setCallEnded] = useState(false);
+  const [showPrescriptionForm, setShowPrescriptionForm] = useState(false);
 
   useEffect(() => {
     if (!id || !token) return;
@@ -80,6 +82,15 @@ export default function AppointmentDetails() {
       "Patient: Thank you, doctor. Should I schedule a follow-up appointment?\n\n" +
       "Doctor: Yes, let's schedule a follow-up in one week to check on your progress. If your test results come back positive for anything concerning, we may need to adjust our treatment plan."
     );
+  };
+
+  const togglePrescriptionForm = () => {
+    setShowPrescriptionForm(!showPrescriptionForm);
+  };
+
+  const handlePrescriptionCreated = () => {
+    setShowPrescriptionForm(false);
+    // Optionally refresh appointment data or show a success message
   };
 
   if (loading) {
@@ -137,6 +148,10 @@ export default function AppointmentDetails() {
     );
   };
 
+  const isDoctor = user?.role === 'contractor';
+  const canCreatePrescription = isDoctor && 
+    (appointment.status === 'completed' || appointment.status === 'in-progress');
+
   return (
     <Layout>
       <div className="max-w-4xl mx-auto p-4">
@@ -176,13 +191,22 @@ export default function AppointmentDetails() {
             </div>
           )}
 
-          <div className="mt-6">
+          <div className="mt-6 flex flex-wrap gap-2">
             {canStartVideoCall() && !showVideoCall && (
               <button
                 onClick={startVideoCall}
-                className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md mr-2"
+                className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md"
               >
                 Start Video Consultation
+              </button>
+            )}
+            
+            {canCreatePrescription && (
+              <button
+                onClick={togglePrescriptionForm}
+                className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-md"
+              >
+                {showPrescriptionForm ? 'Hide Prescription Form' : 'Create Prescription'}
               </button>
             )}
             
@@ -204,6 +228,16 @@ export default function AppointmentDetails() {
             >
               End Call
             </button>
+          </div>
+        )}
+
+        {showPrescriptionForm && (
+          <div className="mb-6">
+            <CreatePrescription 
+              appointmentId={appointment.id} 
+              patientId={appointment.customerId}
+              onPrescriptionCreated={handlePrescriptionCreated}
+            />
           </div>
         )}
 

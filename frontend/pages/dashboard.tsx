@@ -2,6 +2,7 @@ import { useContext, useEffect, useState } from "react";
 import { AuthContext } from "../context/AuthContext";
 import axios from "axios";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import Notifications from "../components/Notifications";
 
 export default function Dashboard() {
   const { user, logout } = useContext(AuthContext);
@@ -41,7 +42,12 @@ export default function Dashboard() {
 
   return (
     <div className="p-6">
-      <h2 className="text-3xl font-bold">Welcome, {user?.email}!</h2>
+      <div className="flex justify-between items-center">
+        <h2 className="text-3xl font-bold">Welcome, {user?.email}!</h2>
+        <div className="flex items-center">
+          <Notifications />
+        </div>
+      </div>
 
       {/* Search */}
       <input

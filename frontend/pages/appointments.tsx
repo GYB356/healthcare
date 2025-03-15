@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import VideoCall from "../components/VideoCall";
 import Layout from "../components/Layout";
+import MedicalReport from "../components/MedicalReport";
 
 interface Doctor {
   _id: string;
@@ -28,6 +29,7 @@ export default function Appointments() {
   const { token, user } = useAuth();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [activeRoom, setActiveRoom] = useState<string | null>(null);
+  const [activeAppointment, setActiveAppointment] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -60,6 +62,14 @@ export default function Appointments() {
 
   const endCall = () => {
     setActiveRoom(null);
+  };
+
+  const viewReport = (appointmentId: string) => {
+    setActiveAppointment(appointmentId);
+  };
+
+  const closeReport = () => {
+    setActiveAppointment(null);
   };
 
   const isToday = (dateString: string) => {
@@ -118,6 +128,28 @@ export default function Appointments() {
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
             {error}
+          </div>
+        )}
+
+        {activeAppointment && (
+          <div className="mb-6">
+            <div className="bg-white rounded-lg shadow-md p-4">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">Medical Report</h2>
+                <button
+                  onClick={closeReport}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  ✕
+                </button>
+              </div>
+              <MedicalReport 
+                appointmentId={activeAppointment} 
+                onReportGenerated={() => {
+                  // Optionally refresh appointments or update UI after report generation
+                }}
+              />
+            </div>
           </div>
         )}
 
@@ -225,9 +257,17 @@ export default function Appointments() {
                         {isToday(appointment.date) && appointment.status === 'scheduled' && (
                           <button
                             onClick={() => joinCall(appointment._id)}
-                            className="text-green-600 hover:text-green-900 font-medium"
+                            className="text-green-600 hover:text-green-900 font-medium mr-3"
                           >
                             Join Call
+                          </button>
+                        )}
+                        {(appointment.status === 'completed' || appointment.status === 'in-progress') && (
+                          <button
+                            onClick={() => viewReport(appointment._id)}
+                            className="text-purple-600 hover:text-purple-900 font-medium"
+                          >
+                            {isDoctor ? "Generate Report" : "View Report"}
                           </button>
                         )}
                       </td>

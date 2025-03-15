@@ -1,6 +1,7 @@
 import React, { ReactNode } from 'react';
 import Link from 'next/link';
 import { useAuth } from '../context/AuthContext';
+import Notifications from './Notifications';
 
 interface LayoutProps {
   children: ReactNode;
@@ -26,10 +27,28 @@ export default function Layout({ children }: LayoutProps) {
                 <Link href="/appointments">
                   <a className="hover:underline">Appointments</a>
                 </Link>
+                <Link href="/messages">
+                  <a className="hover:underline">Messages</a>
+                </Link>
+                {user.role === 'customer' && (
+                  <Link href="/my-prescriptions">
+                    <a className="hover:underline">My Prescriptions</a>
+                  </Link>
+                )}
                 {user.role === 'contractor' && (
                   <Link href="/projects">
                     <a className="hover:underline">Projects</a>
                   </Link>
+                )}
+                {user && (
+                  <>
+                    <Notifications />
+                    {process.env.NODE_ENV === 'development' && (
+                      <Link href="/test-notifications">
+                        <a className="text-yellow-500 hover:underline">Test Notifications</a>
+                      </Link>
+                    )}
+                  </>
                 )}
                 <button 
                   onClick={logout}
