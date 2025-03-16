@@ -7,14 +7,18 @@ const ReportSchema = new mongoose.Schema(
     report: { type: String, required: true },
     medicalInfo: {
       symptoms: [{ type: String }],
-      diagnosis: { type: String },
+      diagnosis: { type: String }, // Fixed: removed stray bracket
       recommendations: [{ type: String }],
       medications: [{ type: String }],
       followUpNeeded: { type: Boolean, default: false }
     },
-    followUpQuestions: { type: String }
+    followUpQuestions: { type: String },
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
   },
   { timestamps: true }
 );
 
-export default mongoose.model("Report", ReportSchema); 
+export default mongoose.model("Report", ReportSchema);

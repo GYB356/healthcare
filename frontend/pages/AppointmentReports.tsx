@@ -47,6 +47,8 @@ const AppointmentReports: React.FC = () => {
 
   useEffect(() => {
     const fetchAppointment = async () => {
+      if (!appointmentId) return;
+      
       try {
         setLoading(true);
         const response = await axios.get(`/api/appointments/${appointmentId}`, {
@@ -182,4 +184,4 @@ const AppointmentReports: React.FC = () => {
   );
 };
 
-export default AppointmentReports; 
+export default AppointmentReports;

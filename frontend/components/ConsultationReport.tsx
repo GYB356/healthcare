@@ -1,17 +1,11 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { ApiService } from '../services/api';
+import { MedicalInfo } from '../../types';
 
 interface ConsultationReportProps {
   appointmentId: string;
   transcript: string;
-}
-
-interface MedicalInfo {
-  symptoms: string[];
-  diagnosis: string;
-  recommendations: string[];
-  medications: string[];
-  followUpNeeded: boolean;
 }
 
 export default function ConsultationReport({ appointmentId, transcript }: ConsultationReportProps) {
@@ -28,27 +22,19 @@ export default function ConsultationReport({ appointmentId, transcript }: Consul
       setLoading(true);
       setError('');
       
-      const response = await fetch('/api/reports', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ appointmentId, transcript }),
-      });
+      const response = await ApiService.createReport(appointmentId, transcript);
       
-      if (!response.ok) {
-        throw new Error('Failed to generate report');
+      if (!response.success || !response.data) {
+        throw new Error(response.error || 'Failed to generate report');
       }
       
-      const data = await response.json();
-      setReport(data.report.report);
-      setMedicalInfo(data.report.medicalInfo);
-      setFollowUpQuestions(data.report.followUpQuestions);
-      setLoading(false);
+      setReport(response.data.report.report);
+      setMedicalInfo(response.data.report.medicalInfo);
+      setFollowUpQuestions(response.data.report.followUpQuestions);
     } catch (err) {
       console.error('Error generating report:', err);
       setError('Failed to generate report. Please try again.');
+    } finally {
       setLoading(false);
     }
   };
@@ -58,29 +44,23 @@ export default function ConsultationReport({ appointmentId, transcript }: Consul
       setLoading(true);
       setError('');
       
-      const response = await fetch(`/api/reports/${appointmentId}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await ApiService.getReports(appointmentId);
       
-      if (!response.ok) {
-        throw new Error('Failed to fetch medical information');
+      if (!response.success || !response.data) {
+        throw new Error(response.error || 'Failed to fetch reports');
       }
       
-      const reports = await response.json();
-      if (reports.length > 0) {
-        setReport(reports[0].report);
-        setMedicalInfo(reports[0].medicalInfo);
-        setFollowUpQuestions(reports[0].followUpQuestions);
+      if (response.data.length > 0) {
+        setReport(response.data[0].report);
+        setMedicalInfo(response.data[0].medicalInfo);
+        setFollowUpQuestions(response.data[0].followUpQuestions);
       } else {
         throw new Error('No reports found for this appointment');
       }
-      
-      setLoading(false);
     } catch (err) {
       console.error('Error fetching medical info:', err);
       setError('Failed to fetch medical information. Please try again.');
+    } finally {
       setLoading(false);
     }
   };
@@ -92,19 +72,14 @@ export default function ConsultationReport({ appointmentId, transcript }: Consul
       
       // If we already have a report with follow-up questions, use that
       if (report) {
-        const response = await fetch(`/api/reports/${appointmentId}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        const response = await ApiService.getReports(appointmentId);
         
-        if (!response.ok) {
-          throw new Error('Failed to fetch follow-up questions');
+        if (!response.success || !response.data) {
+          throw new Error(response.error || 'Failed to fetch reports');
         }
         
-        const reports = await response.json();
-        if (reports.length > 0 && reports[0].followUpQuestions) {
-          setFollowUpQuestions(reports[0].followUpQuestions);
+        if (response.data.length > 0 && response.data[0].followUpQuestions) {
+          setFollowUpQuestions(response.data[0].followUpQuestions);
         } else {
           // If no existing report with follow-up questions, generate a new one
           await generateReport();
@@ -113,11 +88,10 @@ export default function ConsultationReport({ appointmentId, transcript }: Consul
         // If no report exists, generate a new one
         await generateReport();
       }
-      
-      setLoading(false);
     } catch (err) {
       console.error('Error generating follow-up questions:', err);
       setError('Failed to generate follow-up questions. Please try again.');
+    } finally {
       setLoading(false);
     }
   };
@@ -314,4 +288,4 @@ export default function ConsultationReport({ appointmentId, transcript }: Consul
       )}
     </div>
   );
-} 
+}

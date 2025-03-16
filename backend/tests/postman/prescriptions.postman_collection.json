@@ -1,0 +1,71 @@
+{
+  "info": {
+    "name": "Prescriptions API Tests",
+    "description": "Collection of tests for the prescriptions API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Create Prescription",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"patientId\": \"{{patientId}}\",\n  \"doctorId\": \"{{doctorId}}\",\n  \"medicationName\": \"Test Medication\",\n  \"dosage\": \"1 tablet\",\n  \"frequency\": \"twice a day\",\n  \"startDate\": \"2023-01-01\",\n  \"endDate\": \"2023-01-10\",\n  \"instructions\": \"Take with food\",\n  \"sideEffects\": \"Nausea\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/prescriptions",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "prescriptions"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Prescription by ID",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/prescriptions/{{prescriptionId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "prescriptions", "{{prescriptionId}}"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Prescriptions for Patient",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/prescriptions/patient/{{patientId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "prescriptions", "patient", "{{patientId}}"]
+        }
+      },
+      "response": []
+    }
+  ]
+}

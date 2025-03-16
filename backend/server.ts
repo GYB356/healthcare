@@ -4,26 +4,26 @@ import { Server } from "socket.io";
 import cors from "cors";
 import dotenv from 'dotenv';
 import CryptoJS from 'crypto-js';
+import mongoose from 'mongoose';
+import { errorMiddleware } from './utils/errorHandler';
+
+// Regular imports
 import appointmentRoutes from "./routes/appointments";
 import videoRoutes from "./routes/video";
 import prescriptionRoutes from "./routes/prescriptions";
-import mongoose from 'mongoose';
 import testRoutes from "./routes/test";
 import chatRoutes from "./routes/chat";
 import usersRoutes from "./routes/users";
+import reportRoutes from "./routes/reports";
 import { Message } from "./models/Message";
 import { Chat } from "./models/Chat";
 import Notification from "./models/Notification";
 
-// Use type assertions to bypass TypeScript errors
-// @ts-ignore
-import authRoutes from './routes/authRoutes';
-// @ts-ignore
-import projectRoutes from './routes/projectRoutes';
-// @ts-ignore
-import aiRoutes from './routes/aiRoutes';
-// @ts-ignore
-import reportRoutes from './routes/reports';
+// Type safe imports, when TS files are available
+// For routes that are still in JS, use "require" as a fallback
+const authRoutes = require('./routes/authRoutes');
+const projectRoutes = require('./routes/projectRoutes');
+const aiRoutes = require('./routes/aiRoutes');
 
 // Load environment variables
 dotenv.config();
@@ -42,17 +42,20 @@ const io = new Server(server, {
   },
 });
 
-const users = {}; // Store connected users
+// User connection tracking
+const users: Record<string, { socketId: string; name: string }> = {};
 
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
+  // User connection events
   socket.on("joinRoom", ({ userId, name }) => {
     users[userId] = { socketId: socket.id, name };
     io.emit("updateOnlineUsers", Object.values(users));
     console.log(`${name} joined with socket ID: ${socket.id}`);
   });
 
+  // Video call events
   socket.on("callUser", ({ to, signalData, from }) => {
     if (users[to]) {
       io.to(users[to].socketId).emit("incomingCall", { signal: signalData, from });
@@ -65,61 +68,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("sendMessage", async ({ senderId, receiverId, text }) => {
-    const message = new Message({ senderId, receiverId, text });
-    await message.save();
-
-    const notification = new Notification({
-      userId: receiverId,
-      message: `New message from ${senderId}`,
-    });
-    await notification.save();
-
-    io.to(users[receiverId]?.socketId).emit("receiveMessage", { senderId, text });
-    io.to(users[receiverId]?.socketId).emit("newNotification", notification);
-  });
-
-  socket.on("fetchMessages", async ({ userId, partnerId }) => {
-    const messages = await Message.find({
-      $or: [
-        { senderId: userId, receiverId: partnerId },
-        { senderId: partnerId, receiverId: userId },
-      ],
-    }).sort({ timestamp: 1 });
-
-    socket.emit("messageHistory", messages);
-  });
-
-  socket.on("fetchNotifications", async ({ userId }) => {
-    const notifications = await Notification.find({ userId, isRead: false });
-    socket.emit("notifications", notifications);
-  });
-
-  socket.on("markNotificationsRead", async ({ userId }) => {
-    await Notification.updateMany({ userId }, { $set: { isRead: true } });
-  });
-
-  socket.on("disconnect", () => {
-    console.log("User disconnected:", socket.id);
-    Object.keys(users).forEach((key) => {
-      if (users[key].socketId === socket.id) delete users[key];
-    });
-    io.emit("updateOnlineUsers", Object.values(users));
-  });
-
-  // Join user-specific room for notifications
-  socket.on("joinRoom", (userId) => {
-    socket.join(userId); // Join a room based on the user's ID
-    console.log(`User joined room: ${userId}`);
-  });
-
-  // Join chat room
-  socket.on("joinChat", (chatId) => {
-    socket.join(chatId);
-    console.log(`User joined chat: ${chatId}`);
-  });
-
-  // Handle sending messages
+  // Chat events
   socket.on("sendMessage", async ({ chatId, senderId, receiverId, message }) => {
     try {
       // Encrypt the message
@@ -172,7 +121,34 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Handle test notifications from client
+  // Other message and notification events
+  socket.on("fetchMessages", async ({ userId, partnerId }) => {
+    const messages = await Message.find({
+      $or: [
+        { senderId: userId, receiverId: partnerId },
+        { senderId: partnerId, receiverId: userId },
+      ],
+    }).sort({ timestamp: 1 });
+
+    socket.emit("messageHistory", messages);
+  });
+
+  socket.on("fetchNotifications", async ({ userId }) => {
+    const notifications = await Notification.find({ userId, isRead: false });
+    socket.emit("notifications", notifications);
+  });
+
+  socket.on("markNotificationsRead", async ({ userId }) => {
+    await Notification.updateMany({ userId }, { $set: { isRead: true } });
+  });
+
+  // Room joining events
+  socket.on("joinChat", (chatId) => {
+    socket.join(chatId);
+    console.log(`User joined chat: ${chatId}`);
+  });
+
+  // Test events
   socket.on("test-notification", (data) => {
     const { userId, notification } = data;
     if (userId && notification) {
@@ -181,11 +157,17 @@ io.on("connection", (socket) => {
     }
   });
 
+  // Disconnect event
   socket.on("disconnect", () => {
-    console.log(`🔴 User disconnected: ${socket.id}`);
+    console.log("User disconnected:", socket.id);
+    Object.keys(users).forEach((key) => {
+      if (users[key].socketId === socket.id) delete users[key];
+    });
+    io.emit("updateOnlineUsers", Object.values(users));
   });
 });
 
+// Express middleware
 app.use(cors());
 app.use(express.json());
 
@@ -201,12 +183,14 @@ app.use("/api/test", testRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/users", usersRoutes);
 
-// Emit Notification to all users
+// Error handling middleware (must be after routes)
+app.use(errorMiddleware);
+
+// Helper functions for sending notifications
 export const sendNotification = (message: string) => {
   io.emit("notification", message);
 };
 
-// Emit Notification to a specific user
 export const sendUserNotification = (userId: string, message: string) => {
   io.to(userId).emit("notification", message);
 };

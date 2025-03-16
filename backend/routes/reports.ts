@@ -3,16 +3,17 @@ import { generateMedicalReport, extractMedicalInfo, generateFollowUpQuestions } 
 import { authenticate } from "../middleware/authMiddleware";
 import Report from "../models/Report";
 import { protect, authorize } from "../middleware/auth";
+import { AppError } from "../utils/errorHandler";
 
 const router = express.Router();
 
-// 📌 Generate and save medical report
-router.post("/", authenticate, async (req, res) => {
+// Generate and save medical report
+router.post("/", authenticate, async (req, res, next) => {
   try {
     const { appointmentId, transcript } = req.body;
     
     if (!appointmentId || !transcript) {
-      return res.status(400).json({ message: "Appointment ID and transcript required" });
+      throw new AppError("Appointment ID and transcript required", 400, "VALIDATION_ERROR");
     }
     
     // Generate report text
@@ -37,44 +38,45 @@ router.post("/", authenticate, async (req, res) => {
     
     res.json({ message: "Report saved", report });
   } catch (error) {
-    console.error("Error generating report:", error);
-    res.status(500).json({ message: "Server error" });
+    next(error); // Forward to error middleware
   }
 });
 
-// 📌 Fetch reports for a patient
-router.get("/:appointmentId", authenticate, async (req, res) => {
+// Fetch reports for an appointment
+router.get("/:appointmentId", authenticate, async (req, res, next) => {
   try {
     const reports = await Report.find({ appointmentId: req.params.appointmentId })
       .sort({ createdAt: -1 });
     
     res.json(reports);
   } catch (error) {
-    console.error("Error fetching reports:", error);
-    res.status(500).json({ message: "Server error" });
+    next(error);
   }
 });
 
 // Get a specific report by ID
-router.get("/detail/:reportId", authenticate, async (req, res) => {
+router.get("/detail/:reportId", authenticate, async (req, res, next) => {
   try {
     const report = await Report.findById(req.params.reportId);
     
     if (!report) {
-      return res.status(404).json({ message: "Report not found" });
+      throw new AppError("Report not found", 404, "NOT_FOUND");
     }
     
     res.json(report);
   } catch (error) {
-    console.error("Error fetching report:", error);
-    res.status(500).json({ message: "Server error" });
+    next(error);
   }
 });
 
 // Fetch reports for the authenticated patient
-router.get("/my-reports", protect, authorize("patient"), async (req, res) => {
-  const reports = await Report.find({ patientId: req.user.id });
-  res.json(reports);
+router.get("/my-reports", protect, authorize("patient"), async (req, res, next) => {
+  try {
+    const reports = await Report.find({ patientId: req.user.id });
+    res.json(reports);
+  } catch (error) {
+    next(error);
+  }
 });
 
 export default router;

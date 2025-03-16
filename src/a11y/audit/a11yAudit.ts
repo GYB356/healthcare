@@ -1,206 +1,96 @@
-import { axe, RunOptions, ElementContext, ImpactValue } from 'axe-core';
+import { A11yAuditSystem } from './a11yAuditSystem';
+import { A11ySeverity } from './types';
+import { A11yViolation, AuditResult } from '../../../types';
 
-/**
- * Interface for audit results
- */
-export interface A11yAuditResult {
-  violations: A11yViolation[];
-  passes: A11yPass[];
-  incomplete: A11yIncomplete[];
-  inapplicable: A11yInapplicable[];
-  timestamp: Date;
-  url: string;
-  component?: string;
-}
-
-/**
- * Interface for a violation
- */
-export interface A11yViolation {
-  id: string;
-  impact: ImpactValue;
-  description: string;
-  help: string;
-  helpUrl: string;
-  nodes: A11yNode[];
-  tags: string[];
-}
-
-/**
- * Interface for a pass
- */
-export interface A11yPass {
-  id: string;
-  description: string;
-  help: string;
-  helpUrl: string;
-  nodes: A11yNode[];
-  tags: string[];
-}
-
-/**
- * Interface for an incomplete result
- */
-export interface A11yIncomplete {
-  id: string;
-  impact: ImpactValue;
-  description: string;
-  help: string;
-  helpUrl: string;
-  nodes: A11yNode[];
-  tags: string[];
-}
-
-/**
- * Interface for an inapplicable rule
- */
-export interface A11yInapplicable {
-  id: string;
-  description: string;
-  help: string;
-  helpUrl: string;
-  nodes: A11yNode[];
-  tags: string[];
-}
-
-/**
- * Interface for a node in the results
- */
-export interface A11yNode {
-  html: string;
-  target: string[];
-  failureSummary?: string;
-}
-
-/**
- * Configuration options for the audit
- */
-export interface A11yAuditOptions {
-  rules?: {
-    [key: string]: {
-      enabled: boolean;
-    };
-  };
-  reporter?: 'v1' | 'v2' | 'raw' | 'no-passes';
-  resultTypes?: ('violations' | 'incomplete' | 'inapplicable' | 'passes')[];
-  selectors?: boolean;
-  xpath?: boolean;
-  absolutePaths?: boolean;
-  ancestry?: boolean;
-  includedImpacts?: ImpactValue[];
-  excludeHidden?: boolean;
-}
-
-/**
- * Default audit options
- */
-const defaultAuditOptions: A11yAuditOptions = {
-  reporter: 'v2',
-  resultTypes: ['violations', 'incomplete'],
-  selectors: true,
-  xpath: false,
-  absolutePaths: false,
-  ancestry: true,
-  includedImpacts: ['critical', 'serious', 'moderate', 'minor'],
-  excludeHidden: false,
+export {
+  A11yAuditSystem,
+  A11ySeverity
 };
 
-/**
- * Runs an accessibility audit on the provided element or context
- * 
- * @param context - The element or context to audit
- * @param options - Options for the audit
- * @returns - The audit results
- */
-export const runA11yAudit = async (
-  context: ElementContext = document,
-  options: A11yAuditOptions = {}
-): Promise<A11yAuditResult> => {
-  // Merge options with defaults
-  const mergedOptions: RunOptions = {
-    ...defaultAuditOptions,
-    ...options,
-  };
+interface AuditOptions {
+  baseUrl: string;
+  routes: string[];
+  outputDir: string;
+  headless?: boolean;
+  failOnCritical?: boolean;
+  maxDepth?: number;
+}
+
+interface ComplianceReportSummary {
+  total: number;
+  critical: number;
+  serious: number;
+  moderate: number;
+  minor: number;
+  passRate: number;
+  importantViolations: Array<{ 
+    id: string;
+    impact: string;
+    help: string;
+    helpUrl: string;
+    nodeCount: number;
+  }>;
+}
+
+// Export a convenient function to run the audit
+export const runA11yAudit = async (options: AuditOptions): Promise<AuditResult[]> => {
+  const auditSystem = new A11yAuditSystem({
+    baseUrl: options.baseUrl,
+    routes: options.routes,
+    outputDir: options.outputDir,
+    headless: options.headless !== false,
+    failOnCritical: options.failOnCritical || false,
+    maxDepth: options.maxDepth || 3
+  });
   
-  try {
-    // Run the axe audit
-    const results = await axe.run(context, mergedOptions as any);
-    
-    // Format the results
-    const auditResult: A11yAuditResult = {
-      violations: results.violations,
-      passes: results.passes,
-      incomplete: results.incomplete,
-      inapplicable: results.inapplicable,
-      timestamp: new Date(),
-      url: window.location.href,
-    };
-    
-    return auditResult;
-  } catch (error) {
-    console.error('A11y audit failed:', error);
-    throw error;
-  }
+  await auditSystem.run();
+  return await auditSystem.generateReport();
 };
 
-/**
- * Runs an accessibility audit on a specific component
- * 
- * @param componentRef - Reference to the component to audit
- * @param componentName - Name of the component
- * @param options - Options for the audit
- * @returns - The audit results
- */
-export const runComponentAudit = async (
-  componentRef: React.RefObject<HTMLElement>,
-  componentName: string,
-  options: A11yAuditOptions = {}
-): Promise<A11yAuditResult> => {
-  if (!componentRef.current) {
-    throw new Error(`Component "${componentName}" not found in DOM`);
-  }
-  
-  const results = await runA11yAudit(componentRef.current, options);
-  
-  // Add component name to the results
-  return {
-    ...results,
-    component: componentName,
-  };
+// Create a function to generate a compliance report
+export const generateA11yComplianceReport = async (auditResults: AuditResult[]): Promise<string> => {
+  const summary = createComplianceReport(auditResults);
+  return summary;
 };
 
-/**
- * Generates a summary of audit violations
- * 
- * @param auditResult - The audit results
- * @returns - A summary of the violations
- */
-export const generateViolationSummary = (auditResult: A11yAuditResult): string => {
-  if (auditResult.violations.length === 0) {
-    return 'No accessibility violations found.';
-  }
+function createComplianceReport(auditResults: AuditResult[]): string {
+  // Initialize summary text
+  let summary = `# Accessibility Compliance Report\n`;
+  summary += `Generated: ${new Date().toISOString()}\n\n`;
+  summary += `## Summary\n`;
+  
+  // Flatten all violations across routes
+  const allViolations: A11yViolation[] = [];
+  auditResults.forEach(result => {
+    if (result.results.violations) {
+      allViolations.push(...result.results.violations);
+    }
+  });
+  
+  // Add overall stats
+  summary += `Total violations: ${allViolations.length}\n`;
   
   // Count violations by impact
-  const countByImpact = {
+  const impactCounts: Record<string, number> = {
     critical: 0,
     serious: 0,
     moderate: 0,
-    minor: 0,
+    minor: 0
   };
   
-  auditResult.violations.forEach((violation) => {
-    countByImpact[violation.impact]++;
+  allViolations.forEach((v) => {
+    if (impactCounts[v.impact]) {
+      impactCounts[v.impact]++;
+    }
   });
   
-  // Generate summary
-  let summary = `Found ${auditResult.violations.length} accessibility violations:\n`;
-  summary += `- Critical: ${countByImpact.critical}\n`;
-  summary += `- Serious: ${countByImpact.serious}\n`;
-  summary += `- Moderate: ${countByImpact.moderate}\n`;
-  summary += `- Minor: ${countByImpact.minor}\n\n`;
+  summary += `Critical: ${impactCounts.critical}\n`;
+  summary += `Serious: ${impactCounts.serious}\n`;
+  summary += `Moderate: ${impactCounts.moderate}\n`;
+  summary += `Minor: ${impactCounts.minor}\n\n`;
   
   // Add details for critical and serious violations
-  const importantViolations = auditResult.violations.filter(
+  const importantViolations = allViolations.filter(
     (v) => v.impact === 'critical' || v.impact === 'serious'
   );
   
@@ -219,7 +109,7 @@ export const generateViolationSummary = (auditResult: A11yAuditResult): string =
         });
         
         if (violation.nodes.length > 3) {
-          summary += `  - ... and ${violation.nodes.length - 3} more\n`;
+          summary += `  - And ${violation.nodes.length - 3} more elements\n`;
         }
       }
       
@@ -228,36 +118,55 @@ export const generateViolationSummary = (auditResult: A11yAuditResult): string =
   }
   
   return summary;
-};
+}
 
-/**
- * Checks if a component passes accessibility audit
- * 
- * @param componentRef - Reference to the component to audit
- * @param componentName - Name of the component
- * @param options - Options for the audit
- * @returns - True if the component has no violations, false otherwise
- */
-export const isComponentAccessible = async (
-  componentRef: React.RefObject<HTMLElement>,
-  componentName: string,
-  options: A11yAuditOptions = {}
-): Promise<boolean> => {
-  try {
-    const results = await runComponentAudit(componentRef, componentName, options);
-    return results.violations.length === 0;
-  } catch (error) {
-    console.error(`Error checking accessibility for ${componentName}:`, error);
-    return false;
-  }
+// Export a function to get a summarized compliance report in object form
+export const getComplianceSummary = (auditResults: AuditResult[]): ComplianceReportSummary => {
+  // Flatten all violations across routes
+  const allViolations: A11yViolation[] = [];
+  auditResults.forEach(result => {
+    if (result.results.violations) {
+      allViolations.push(...result.results.violations);
+    }
+  });
+  
+  // Count violations by impact
+  const impactCounts: Record<string, number> = {
+    critical: 0,
+    serious: 0,
+    moderate: 0,
+    minor: 0
+  };
+  
+  allViolations.forEach((v) => {
+    if (impactCounts[v.impact]) {
+      impactCounts[v.impact]++;
+    }
+  });
+  
+  // Get important violations
+  const importantViolations = allViolations
+    .filter(v => v.impact === 'critical' || v.impact === 'serious')
+    .map(v => ({
+      id: v.id,
+      impact: v.impact,
+      help: v.help,
+      helpUrl: v.helpUrl,
+      nodeCount: v.nodes.length
+    }));
+  
+  // Calculate a simple pass rate (lower is worse)
+  const totalIssues = impactCounts.critical * 10 + impactCounts.serious * 3 + 
+                      impactCounts.moderate + impactCounts.minor * 0.5;
+  const passRate = Math.max(0, Math.min(100, 100 - totalIssues));
+  
+  return {
+    total: allViolations.length,
+    critical: impactCounts.critical,
+    serious: impactCounts.serious,
+    moderate: impactCounts.moderate,
+    minor: impactCounts.minor,
+    passRate: Math.round(passRate),
+    importantViolations
+  };
 };
-
-/**
- * Export default functions for easier imports
- */
-export default {
-  runA11yAudit,
-  runComponentAudit,
-  generateViolationSummary,
-  isComponentAccessible,
-}; 
