@@ -1,0 +1,48 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id       String    @id @default(uuid())
+  name     String
+  email    String    @unique
+  password String
+  role     Role      @default(USER)
+  payments Payment[]
+  payouts  Payout[]
+}
+
+enum Role {
+  USER      // Regular patient
+  DOCTOR    // Can manage assigned patients
+  ADMIN     // Full access
+}
+
+model Payment {
+  id              Int      @id @default(autoincrement())
+  appointmentId   Int
+  patientId       Int
+  doctorId        String
+  amount          Int
+  status          String
+  stripeSessionId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  doctor User @relation(fields: [doctorId], references: [id])
+}
+
+model Payout {
+  id         Int     @id @default(autoincrement())
+  doctorId   String
+  amount     Int
+  status     String  @default("PENDING") // PENDING, APPROVED, REJECTED
+  createdAt  DateTime @default(now())
+
+  doctor  User @relation(fields: [doctorId], references: [id])
+}

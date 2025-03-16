@@ -19,18 +19,17 @@ const loginSchema = z.object({
 // Register New User
 export async function register(req: Request, res: Response) {
   try {
-    const { email, password } = registerSchema.parse(req.body);
+    const { name, email, password, role } = req.body;
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) return res.status(400).json({ message: "User already exists" });
+    // Allow only 'ADMIN' to assign roles
+    const assignedRole = role && req.user?.role === "ADMIN" ? role : "USER";
 
-    // Hash password and save user
     const hashedPassword = await hashPassword(password);
-    const user = new User({ email, password: hashedPassword });
-    await user.save();
+    const newUser = await User.create({
+      data: { name, email, password: hashedPassword, role: assignedRole },
+    });
 
-    return res.status(201).json({ message: "User registered successfully" });
+    res.status(201).json({ message: "User registered", user: newUser });
   } catch (error) {
     return res.status(400).json({ message: "Invalid input data" });
   }
@@ -71,4 +70,4 @@ export async function refreshToken(req: Request, res: Response) {
   } catch (error) {
     return res.status(403).json({ message: "Invalid refresh token" });
   }
-} 
+}

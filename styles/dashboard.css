@@ -1,0 +1,17 @@
+.subscription-status {
+  font-size: 18px;
+  font-weight: bold;
+  padding: 10px;
+  border-radius: 5px;
+  text-align: center;
+}
+
+.subscription-status.active {
+  color: white;
+  background-color: green;
+}
+
+.subscription-status.inactive {
+  color: white;
+  background-color: red;
+}

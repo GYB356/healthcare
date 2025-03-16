@@ -1,28 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/router";
-import axios from "axios";
+import { useAuth } from "../context/AuthContext";
 
-export function useAuth(allowedRoles) {
-  const [loading, setLoading] = useState(true);
-  const [authorized, setAuthorized] = useState(false);
-  const router = useRouter();
+export function withAuth(Component, requiredRole) {
+  return function ProtectedRoute(props) {
+    const { user, loading } = useAuth();
+    const router = useRouter();
 
-  useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const { data } = await axios.get("/api/auth/me");
-        if (allowedRoles.includes(data.role)) {
-          setAuthorized(true);
-        } else {
-          router.push("/unauthorized");
-        }
-      } catch {
+    useEffect(() => {
+      if (!loading && (!user || (requiredRole && user.role !== requiredRole))) {
         router.push("/login");
       }
-      setLoading(false);
-    };
-    checkAuth();
-  }, []);
+    }, [user, loading]);
 
-  return { loading, authorized };
+    return loading ? <p>Loading...</p> : <Component {...props} />;
+  };
 }
