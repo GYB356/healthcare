@@ -1,48 +1,26 @@
-datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
-}
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
   provider = "prisma-client-js"
 }
 
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
 model User {
-  id       String    @id @default(uuid())
-  name     String
-  email    String    @unique
-  password String
-  role     Role      @default(USER)
-  payments Payment[]
-  payouts  Payout[]
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  role      Role     @default(USER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 enum Role {
-  USER      // Regular patient
-  DOCTOR    // Can manage assigned patients
-  ADMIN     // Full access
-}
-
-model Payment {
-  id              Int      @id @default(autoincrement())
-  appointmentId   Int
-  patientId       Int
-  doctorId        String
-  amount          Int
-  status          String
-  stripeSessionId String
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  doctor User @relation(fields: [doctorId], references: [id])
-}
-
-model Payout {
-  id         Int     @id @default(autoincrement())
-  doctorId   String
-  amount     Int
-  status     String  @default("PENDING") // PENDING, APPROVED, REJECTED
-  createdAt  DateTime @default(now())
-
-  doctor  User @relation(fields: [doctorId], references: [id])
-}
+  USER
+  ADMIN
+} 
