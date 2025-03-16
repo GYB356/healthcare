@@ -26,6 +26,23 @@ router.post("/", authenticate, async (req, res) => {
   }
 });
 
+// Create an appointment
+router.post("/schedule", authenticate, (req, res) => {
+  const { patientId, doctorId, date } = req.body;
+
+  const appointment = {
+    id: Date.now(),
+    patientId,
+    doctorId,
+    date,
+  };
+
+  // Emit event to notify doctors
+  io.emit("newAppointment", { message: "New appointment scheduled", appointment });
+
+  res.json({ message: "Appointment scheduled successfully", appointment });
+});
+
 // Get all appointments
 router.get("/all", authenticate, authorizeRoles(["admin"]), async (req, res) => {
   try {
@@ -120,4 +137,4 @@ router.put("/:id/status", authenticate, authorizeRoles(["doctor"]), async (req, 
   }
 });
 
-export default router; 
+export default router;

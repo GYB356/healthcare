@@ -2,6 +2,7 @@ import express from "express";
 import { generateMedicalReport, extractMedicalInfo, generateFollowUpQuestions } from "../utils/aiUtils";
 import { authenticate } from "../middleware/authMiddleware";
 import Report from "../models/Report";
+import { protect, authorize } from "../middleware/auth";
 
 const router = express.Router();
 
@@ -70,4 +71,10 @@ router.get("/detail/:reportId", authenticate, async (req, res) => {
   }
 });
 
-export default router; 
+// Fetch reports for the authenticated patient
+router.get("/my-reports", protect, authorize("patient"), async (req, res) => {
+  const reports = await Report.find({ patientId: req.user.id });
+  res.json(reports);
+});
+
+export default router;

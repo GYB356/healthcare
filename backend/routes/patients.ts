@@ -1,10 +1,10 @@
 import express from "express";
-import { authMiddleware } from "../middleware/authMiddleware";
+import { protect, authorize } from "../middleware/auth";
 import Patient from "../models/Patient";
 
 const router = express.Router();
 
-router.get("/", authMiddleware, async (req, res) => {
+router.get("/", protect, authorize("admin", "doctor"), async (req, res) => {
   try {
     const searchQuery = req.query.search || "";
     const patients = await Patient.find({
@@ -17,4 +17,9 @@ router.get("/", authMiddleware, async (req, res) => {
   }
 });
 
-export default router; 
+router.get("/all", protect, authorize("doctor", "admin"), async (req, res) => {
+  const patients = await User.find({ role: "patient" });
+  res.json(patients);
+});
+
+export default router;

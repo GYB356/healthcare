@@ -13,6 +13,7 @@ import chatRoutes from "./routes/chat";
 import usersRoutes from "./routes/users";
 import { Message } from "./models/Message";
 import { Chat } from "./models/Chat";
+import Notification from "./models/Notification";
 
 // Use type assertions to bypass TypeScript errors
 // @ts-ignore
@@ -32,6 +33,8 @@ const SECRET_KEY = process.env.CHAT_SECRET || "supersecretkey"; // Store securel
 
 const app = express();
 const server = createServer(app);
+
+// Initialize Socket.io
 const io = new Server(server, {
   cors: {
     origin: "*",
@@ -39,24 +42,70 @@ const io = new Server(server, {
   },
 });
 
-app.use(cors());
-app.use(express.json());
+const users = {}; // Store connected users
 
-// Register API routes
-app.use("/api/auth", authRoutes);
-app.use("/api/appointments", appointmentRoutes);
-app.use("/api/projects", projectRoutes);
-app.use("/api/video", videoRoutes);
-app.use("/api/ai", aiRoutes);
-app.use("/api/reports", reportRoutes);
-app.use("/api/prescriptions", prescriptionRoutes);
-app.use("/api/test", testRoutes);
-app.use("/api/chat", chatRoutes);
-app.use("/api/users", usersRoutes);
-
-// WebSocket Connection
 io.on("connection", (socket) => {
-  console.log(`🔵 User connected: ${socket.id}`);
+  console.log("User connected:", socket.id);
+
+  socket.on("joinRoom", ({ userId, name }) => {
+    users[userId] = { socketId: socket.id, name };
+    io.emit("updateOnlineUsers", Object.values(users));
+    console.log(`${name} joined with socket ID: ${socket.id}`);
+  });
+
+  socket.on("callUser", ({ to, signalData, from }) => {
+    if (users[to]) {
+      io.to(users[to].socketId).emit("incomingCall", { signal: signalData, from });
+    }
+  });
+
+  socket.on("answerCall", ({ to, signal }) => {
+    if (users[to]) {
+      io.to(users[to].socketId).emit("callAccepted", { signal });
+    }
+  });
+
+  socket.on("sendMessage", async ({ senderId, receiverId, text }) => {
+    const message = new Message({ senderId, receiverId, text });
+    await message.save();
+
+    const notification = new Notification({
+      userId: receiverId,
+      message: `New message from ${senderId}`,
+    });
+    await notification.save();
+
+    io.to(users[receiverId]?.socketId).emit("receiveMessage", { senderId, text });
+    io.to(users[receiverId]?.socketId).emit("newNotification", notification);
+  });
+
+  socket.on("fetchMessages", async ({ userId, partnerId }) => {
+    const messages = await Message.find({
+      $or: [
+        { senderId: userId, receiverId: partnerId },
+        { senderId: partnerId, receiverId: userId },
+      ],
+    }).sort({ timestamp: 1 });
+
+    socket.emit("messageHistory", messages);
+  });
+
+  socket.on("fetchNotifications", async ({ userId }) => {
+    const notifications = await Notification.find({ userId, isRead: false });
+    socket.emit("notifications", notifications);
+  });
+
+  socket.on("markNotificationsRead", async ({ userId }) => {
+    await Notification.updateMany({ userId }, { $set: { isRead: true } });
+  });
+
+  socket.on("disconnect", () => {
+    console.log("User disconnected:", socket.id);
+    Object.keys(users).forEach((key) => {
+      if (users[key].socketId === socket.id) delete users[key];
+    });
+    io.emit("updateOnlineUsers", Object.values(users));
+  });
 
   // Join user-specific room for notifications
   socket.on("joinRoom", (userId) => {
@@ -137,6 +186,21 @@ io.on("connection", (socket) => {
   });
 });
 
+app.use(cors());
+app.use(express.json());
+
+// Register API routes
+app.use("/api/auth", authRoutes);
+app.use("/api/appointments", appointmentRoutes);
+app.use("/api/projects", projectRoutes);
+app.use("/api/video", videoRoutes);
+app.use("/api/ai", aiRoutes);
+app.use("/api/reports", reportRoutes);
+app.use("/api/prescriptions", prescriptionRoutes);
+app.use("/api/test", testRoutes);
+app.use("/api/chat", chatRoutes);
+app.use("/api/users", usersRoutes);
+
 // Emit Notification to all users
 export const sendNotification = (message: string) => {
   io.emit("notification", message);
@@ -163,4 +227,4 @@ server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-export { io, server, app }; 
+export { io, server, app };

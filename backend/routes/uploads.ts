@@ -2,9 +2,13 @@ import express from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { authenticate, authorizeRoles } from "../middleware/authMiddleware";
+import jwt from "jsonwebtoken";
+import { authenticate, authorizeRoles, protect, authorize } from "../middleware/authMiddleware";
+import { upload as multerUpload } from "../utils/upload";
+import { io } from "../server";
 
 const router = express.Router();
+const JWT_SECRET = process.env.JWT_SECRET || "supersecretkey";
 
 // Ensure upload directory exists
 const uploadDir = path.join(__dirname, "../uploads");
@@ -29,25 +33,43 @@ router.post("/", authenticate, authorizeRoles(["doctor", "admin"]), upload.singl
   if (!req.file) {
     return res.status(400).json({ message: "No file uploaded" });
   }
-  res.json({ message: "File uploaded", filename: req.file.filename });
+
+  const filePath = `/uploads/${req.file.filename}`;
+  
+  // Emit event to notify patients & doctors
+  io.emit("newReport", { message: "New medical report uploaded", filePath });
+
+  res.json({ message: "File uploaded successfully", filePath });
 });
 
-// Secure file retrieval
-router.get("/:filename", authenticate, async (req, res) => {
-  const filename = path.basename(req.params.filename);
-  const filePath = path.join(uploadDir, filename);
+// Generate signed URL for file access
+router.get("/file/:filename", protect, (req, res) => {
+  const filePath = path.join(uploadDir, req.params.filename);
 
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ message: "File not found" });
   }
 
-  // Allow only admin, doctors, or the patient to access the file
-  if (req.user.role === "admin" || req.user.role === "doctor" || 
-      (req.user.files && req.user.files.includes(filename))) {
-    return res.sendFile(filePath);
-  }
+  const token = jwt.sign({ filename: req.params.filename }, JWT_SECRET, { expiresIn: "1h" });
+  const signedUrl = `${req.protocol}://${req.get("host")}/api/uploads/access/${token}`;
 
-  res.status(403).json({ message: "Access denied" });
+  res.json({ signedUrl });
+});
+
+// Access file using signed URL
+router.get("/access/:token", (req, res) => {
+  try {
+    const { filename } = jwt.verify(req.params.token, JWT_SECRET);
+    const filePath = path.join(uploadDir, filename);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ message: "File not found" });
+    }
+
+    res.sendFile(filePath);
+  } catch (error) {
+    res.status(400).json({ message: "Invalid or expired token" });
+  }
 });
 
 // Get list of uploaded files (with role-based access)
@@ -73,4 +95,18 @@ router.get("/", authenticate, (req, res) => {
   });
 });
 
-export default router; 
+// Secure file upload (only for doctors & admins)
+router.post("/upload", protect, authorize("doctor", "admin"), multerUpload.single("file"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: "File upload failed" });
+  }
+
+  const filePath = `/uploads/${req.file.filename}`;
+  
+  // Emit event to notify patients & doctors
+  io.emit("newReport", { message: "New medical report uploaded", filePath });
+
+  res.json({ message: "File uploaded successfully", filePath });
+});
+
+export default router;
