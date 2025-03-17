@@ -7,6 +7,8 @@ const { authenticate, generateToken, generateRefreshToken } = require('../middle
 const { validateLogin, validateRegistration } = require('../middleware/validation');
 const { auditLog } = require('../middleware/audit');
 const config = require('../config/jwt');
+const rateLimit = require('express-rate-limit');
+const speakeasy = require('speakeasy');
 
 // Register new user
 router.post('/register', validateRegistration, async (req, res) => {
@@ -63,50 +65,148 @@ router.post('/register', validateRegistration, async (req, res) => {
   }
 });
 
-// Login
-router.post('/login', validateLogin, async (req, res) => {
+// Add rate limiting middleware
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // limit each IP to 5 login attempts per windowMs
+  message: 'Too many login attempts, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Add 2FA verification middleware
+const verify2FA = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    const { email, twoFactorCode } = req.body;
+    const user = await User.findOne({ email });
+    
+    if (!user || !user.twoFactorSecret) {
+      return next();
+    }
+    
+    const isValid = await speakeasy.totp.verify({
+      secret: user.twoFactorSecret,
+      encoding: 'base32',
+      token: twoFactorCode
+    });
+    
+    if (!isValid) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid 2FA code',
+        requires2FA: true 
+      });
+    }
+    
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Login with enhanced security
+router.post('/login', loginLimiter, validateLogin, verify2FA, async (req, res) => {
+  try {
+    const { email, password, twoFactorCode } = req.body;
 
     // Find user by email
     const user = await User.findOne({ email }).select('+password');
     if (!user) {
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid credentials',
+        attemptsRemaining: req.rateLimit.remaining
+      });
+    }
+
+    // Check if account is locked
+    if (user.isLocked) {
+      const lockoutTime = new Date(user.lockUntil);
+      if (lockoutTime > new Date()) {
+        return res.status(401).json({ 
+          success: false, 
+          message: 'Account is locked. Please try again later.',
+          lockUntil: lockoutTime
+        });
+      }
+      // Reset lock if lockout period has expired
+      user.isLocked = false;
+      user.loginAttempts = 0;
+      await user.save();
     }
 
     // Check password
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) {
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+      // Increment failed attempts
+      user.loginAttempts += 1;
+      
+      // Lock account after 5 failed attempts
+      if (user.loginAttempts >= 5) {
+        user.isLocked = true;
+        user.lockUntil = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+      }
+      
+      await user.save();
+      
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid credentials',
+        attemptsRemaining: 5 - user.loginAttempts
+      });
     }
+
+    // Reset login attempts on successful login
+    user.loginAttempts = 0;
+    user.lastLogin = new Date();
+    await user.save();
 
     // Generate tokens
     const token = generateToken(user);
     const refreshToken = generateRefreshToken(user._id);
 
-    // Store refresh token
+    // Store refresh token with device info
     await User.findByIdAndUpdate(user._id, {
-      $push: { refreshTokens: { token: refreshToken } },
-      lastLogin: new Date()
+      $push: { 
+        refreshTokens: { 
+          token: refreshToken,
+          device: req.headers['user-agent'],
+          ip: req.ip,
+          lastUsed: new Date()
+        } 
+      }
     });
 
-    // Log login
-    auditLog('user:login', { userId: user._id, role: user.role });
+    // Log login with security details
+    auditLog('user:login', { 
+      userId: user._id, 
+      role: user.role,
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+      twoFactorEnabled: !!user.twoFactorSecret
+    });
 
-    // Remove password from response
+    // Remove sensitive data from response
     const userObject = user.toObject();
     delete userObject.password;
+    delete userObject.twoFactorSecret;
+    delete userObject.refreshTokens;
 
     res.json({
       success: true,
       message: 'Login successful',
       user: userObject,
       token,
-      refreshToken
+      refreshToken,
+      requires2FA: !!user.twoFactorSecret
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ success: false, message: 'Login failed' });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Login failed',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

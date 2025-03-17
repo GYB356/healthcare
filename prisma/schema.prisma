@@ -10,17 +10,103 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum UserRole {
+  ADMIN
+  DOCTOR
+  PATIENT
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
   password  String
-  name      String?
-  role      Role     @default(USER)
+  name      String
+  role      UserRole @default(PATIENT)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Relations
+  doctorAppointments    Appointment[] @relation("DoctorAppointments")
+  patientAppointments   Appointment[] @relation("PatientAppointments")
+  doctorMedicalRecords  MedicalRecord[] @relation("DoctorMedicalRecords")
+  patientMedicalRecords MedicalRecord[] @relation("PatientMedicalRecords")
+  prescriptionsGiven    Prescription[] @relation("DoctorPrescriptions")
+  prescriptionsReceived Prescription[] @relation("PatientPrescriptions")
+  department           Department?    @relation(fields: [departmentId], references: [id])
+  departmentId         String?
+
+  @@map("users")
 }
 
-enum Role {
-  USER
-  ADMIN
-} 
+model Department {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  doctors   User[]
+
+  @@map("departments")
+}
+
+model Appointment {
+  id        String            @id @default(cuid())
+  date      DateTime
+  time      String
+  status    AppointmentStatus @default(SCHEDULED)
+  notes     String?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  // Relations
+  doctor     User   @relation("DoctorAppointments", fields: [doctorId], references: [id])
+  doctorId   String
+  patient    User   @relation("PatientAppointments", fields: [patientId], references: [id])
+  patientId  String
+
+  @@map("appointments")
+}
+
+model MedicalRecord {
+  id          String   @id @default(cuid())
+  date        DateTime @default(now())
+  type        String
+  diagnosis   String
+  prescription String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  doctor     User   @relation("DoctorMedicalRecords", fields: [doctorId], references: [id])
+  doctorId   String
+  patient    User   @relation("PatientMedicalRecords", fields: [patientId], references: [id])
+  patientId  String
+
+  @@map("medical_records")
+}
+
+model Prescription {
+  id          String   @id @default(cuid())
+  medication  String
+  dosage      String
+  frequency   String
+  startDate   DateTime
+  endDate     DateTime
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  doctor     User   @relation("DoctorPrescriptions", fields: [doctorId], references: [id])
+  doctorId   String
+  patient    User   @relation("PatientPrescriptions", fields: [patientId], references: [id])
+  patientId  String
+
+  @@map("prescriptions")
+}

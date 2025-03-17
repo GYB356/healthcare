@@ -11,9 +11,12 @@ const Login = () => {
   const { login, isAuthenticated, error: authError } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [twoFactorCode, setTwoFactorCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [requires2FA, setRequires2FA] = useState(false);
+  const [attemptsRemaining, setAttemptsRemaining] = useState(5);
   
   const navigate = useNavigate();
   const location = useLocation();
@@ -51,14 +54,56 @@ const Login = () => {
       setLoading(true);
       setError('');
       
-      await login(email, password);
+      const loginData = {
+        email,
+        password,
+        ...(requires2FA && { twoFactorCode })
+      };
+
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(loginData),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (data.requires2FA) {
+          setRequires2FA(true);
+          setError('Please enter your 2FA code');
+          return;
+        } 
+        
+        if (data.attemptsRemaining) {
+          setAttemptsRemaining(data.attemptsRemaining);
+          setError(`Invalid credentials. ${data.attemptsRemaining} attempts remaining.`);
+        } else if (data.lockUntil) {
+          const lockTime = new Date(data.lockUntil);
+          const minutes = Math.ceil((lockTime - new Date()) / 60000);
+          setError(`Account is locked. Please try again in ${minutes} minutes.`);
+        } else if (data.error === 'INVALID_2FA') {
+          setError('Invalid 2FA code. Please try again.');
+        } else {
+          setError(data.message || 'Login failed. Please try again.');
+        }
+        return;
+      }
+
+      // Clear any existing errors
+      setError('');
       
-      // If login is successful, it will redirect via the useEffect above
+      // Successful login
+      await login(data.token, data.refreshToken);
+      
+      // Navigate to the appropriate dashboard based on user role
+      const dashboardRoute = handleUserRole(data.user);
+      navigate(dashboardRoute);
     } catch (err) {
-      setError(
-        err.response?.data?.message || 
-        'Login failed. Please check your credentials and try again.'
-      );
+      console.error('Login error:', err);
+      setError('An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -138,7 +183,10 @@ const Login = () => {
                 autoComplete="email"
                 required
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setError('');
+                }}
                 className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
                 placeholder="Email address"
               />
@@ -154,7 +202,10 @@ const Login = () => {
                 autoComplete="current-password"
                 required
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setError('');
+                }}
                 className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
                 placeholder="Password"
               />
@@ -168,6 +219,24 @@ const Login = () => {
                 </span>
               </button>
             </div>
+            {requires2FA && (
+              <div className="mt-4">
+                <label htmlFor="twoFactorCode" className="sr-only">2FA Code</label>
+                <input
+                  id="twoFactorCode"
+                  name="twoFactorCode"
+                  type="text"
+                  value={twoFactorCode}
+                  onChange={(e) => {
+                    setTwoFactorCode(e.target.value);
+                    setError('');
+                  }}
+                  className="appearance-none rounded-md relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                  placeholder="Enter 2FA code"
+                  autoComplete="one-time-code"
+                />
+              </div>
+            )}
           </div>
 
           <div className="flex items-center justify-between">

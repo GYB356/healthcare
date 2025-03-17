@@ -9,6 +9,32 @@ import ProjectRepository from '../repositories/projectRepository';
 import TaskRepository from '../repositories/taskRepository';
 import { v4 as uuidv4 } from 'uuid';
 
+// Custom error classes
+class TimeEntryError extends Error {
+  constructor(message: string, public code: string) {
+    super(message);
+    this.name = 'TimeEntryError';
+  }
+}
+
+class ValidationError extends TimeEntryError {
+  constructor(message: string) {
+    super(message, 'VALIDATION_ERROR');
+  }
+}
+
+class ConcurrencyError extends TimeEntryError {
+  constructor(message: string) {
+    super(message, 'CONCURRENCY_ERROR');
+  }
+}
+
+class DatabaseError extends TimeEntryError {
+  constructor(message: string) {
+    super(message, 'DATABASE_ERROR');
+  }
+}
+
 interface TimeEntriesFilter {
   projectId?: string;
   taskId?: string;
@@ -31,6 +57,8 @@ export default class TimeEntryService {
   private timeEntryRepo: TimeEntryRepository;
   private projectRepo: ProjectRepository;
   private taskRepo: TaskRepository;
+  private readonly MAX_RETRIES = 3;
+  private readonly RETRY_DELAY = 1000; // 1 second
 
   constructor() {
     this.timeEntryRepo = new TimeEntryRepository();
@@ -38,7 +66,28 @@ export default class TimeEntryService {
     this.taskRepo = new TaskRepository();
   }
 
-  // Start a new timer
+  // Retry wrapper function
+  private async withRetry<T>(
+    operation: () => Promise<T>,
+    maxRetries: number = this.MAX_RETRIES
+  ): Promise<T> {
+    let lastError: Error;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY * attempt));
+        }
+      }
+    }
+    
+    throw lastError;
+  }
+
+  // Start a new timer with validation and retry
   public async startTimer(
     userId: string,
     taskId: string,
@@ -46,79 +95,87 @@ export default class TimeEntryService {
     billable: boolean = true,
     tags: string[] = []
   ): Promise<TimeEntry> {
-    // Check if user has an active timer
-    const activeTimer = await this.getCurrentTimer(userId);
-    if (activeTimer) {
-      throw new Error('You already have an active timer running. Please stop it before starting a new one.');
-    }
+    return this.withRetry(async () => {
+      // Validate input
+      if (!userId || !taskId) {
+        throw new ValidationError('Missing required fields');
+      }
 
-    // Get task details to get the project ID
-    const task = await this.taskRepo.getTaskById(taskId);
-    if (!task) {
-      throw new Error('Task not found');
-    }
+      // Check if user has an active timer
+      const activeTimer = await this.getCurrentTimer(userId);
+      if (activeTimer) {
+        throw new ValidationError('You already have an active timer running');
+      }
 
-    // Get billable rate for this user/project combination
-    const billableRate = await this.getBillableRate(userId, task.projectId);
+      // Get task details
+      const task = await this.taskRepo.getTaskById(taskId);
+      if (!task) {
+        throw new ValidationError('Task not found');
+      }
 
-    const timeEntry: TimeEntry = {
-      id: uuidv4(),
-      taskId,
-      projectId: task.projectId,
-      userId,
-      description,
-      startTime: new Date(),
-      endTime: null, // Running timer
-      duration: 0, // Will be calculated when timer stops
-      billable,
-      invoiceId: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      billableRate: billableRate?.hourlyRate || null,
-      tags,
-      source: 'timer'
-    };
+      // Get billable rate
+      const billableRate = await this.getBillableRate(userId, task.projectId);
 
-    return this.timeEntryRepo.createTimeEntry(timeEntry);
+      const timeEntry: TimeEntry = {
+        id: uuidv4(),
+        taskId,
+        projectId: task.projectId,
+        userId,
+        description,
+        startTime: new Date(),
+        endTime: null,
+        duration: 0,
+        billable,
+        invoiceId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        billableRate: billableRate?.hourlyRate || null,
+        tags,
+        source: 'timer',
+        version: 1
+      };
+
+      return this.timeEntryRepo.createTimeEntry(timeEntry);
+    });
   }
 
-  // Stop an active timer
+  // Stop timer with validation and retry
   public async stopTimer(
     userId: string,
     timeEntryId: string,
     endTime: Date
   ): Promise<TimeEntry> {
-    const timeEntry = await this.timeEntryRepo.getTimeEntryById(timeEntryId);
-    
-    if (!timeEntry) {
-      throw new Error('Time entry not found');
-    }
+    return this.withRetry(async () => {
+      const timeEntry = await this.timeEntryRepo.getTimeEntryById(timeEntryId);
+      
+      if (!timeEntry) {
+        throw new ValidationError('Time entry not found');
+      }
 
-    if (timeEntry.userId !== userId) {
-      throw new Error('You do not have permission to stop this timer');
-    }
+      if (timeEntry.userId !== userId) {
+        throw new ValidationError('You do not have permission to stop this timer');
+      }
 
-    if (timeEntry.endTime !== null) {
-      throw new Error('This timer is already stopped');
-    }
+      if (timeEntry.endTime !== null) {
+        throw new ValidationError('This timer is already stopped');
+      }
 
-    // Calculate duration in seconds
-    const durationSeconds = Math.floor((endTime.getTime() - timeEntry.startTime.getTime()) / 1000);
-    
-    // Apply rounding if configured in user settings
-    const settings = await this.getUserSettings(userId);
-    const roundedDuration = this.applyTimeRounding(durationSeconds, settings.roundingInterval);
+      const durationSeconds = Math.floor((endTime.getTime() - timeEntry.startTime.getTime()) / 1000);
+      const settings = await this.getUserSettings(userId);
+      const roundedDuration = this.applyTimeRounding(durationSeconds, settings.roundingInterval);
 
-    const updatedTimeEntry: Partial<TimeEntry> = {
-      endTime,
-      duration: roundedDuration,
-      updatedAt: new Date()
-    };
+      const updatedTimeEntry: Partial<TimeEntry> = {
+        endTime,
+        duration: roundedDuration,
+        updatedAt: new Date(),
+        version: timeEntry.version + 1
+      };
 
-    return this.timeEntryRepo.updateTimeEntry(timeEntryId, updatedTimeEntry);
+      return this.timeEntryRepo.updateTimeEntry(timeEntryId, updatedTimeEntry);
+    });
   }
 
-  // Create a manual time entry
+  // Create manual entry with validation and retry
   public async createManualEntry(
     userId: string,
     taskId: string,
@@ -131,55 +188,60 @@ export default class TimeEntryService {
     billableRate: number | null = null,
     tags: string[] = []
   ): Promise<TimeEntry> {
-    // Validate task belongs to the project
-    const task = await this.taskRepo.getTaskById(taskId);
-    if (!task) {
-      throw new Error('Task not found');
-    }
-    
-    if (task.projectId !== projectId) {
-      throw new Error('Task does not belong to the specified project');
-    }
-
-    // If duration is not provided, calculate it from start and end times
-    let calculatedDuration = duration;
-    if (!calculatedDuration) {
-      calculatedDuration = Math.floor((endTime.getTime() - startTime.getTime()) / 1000);
-      if (calculatedDuration <= 0) {
-        throw new Error('End time must be after start time');
+    return this.withRetry(async () => {
+      // Validate input
+      if (!userId || !taskId || !projectId || !startTime || !endTime) {
+        throw new ValidationError('Missing required fields');
       }
-    }
 
-    // Apply rounding if configured in user settings
-    const settings = await this.getUserSettings(userId);
-    const roundedDuration = this.applyTimeRounding(calculatedDuration, settings.roundingInterval);
+      if (endTime <= startTime) {
+        throw new ValidationError('End time must be after start time');
+      }
 
-    // Get billable rate if not provided
-    let rate = billableRate;
-    if (billable && rate === null) {
-      const rateInfo = await this.getBillableRate(userId, projectId);
-      rate = rateInfo?.hourlyRate || null;
-    }
+      // Validate task belongs to project
+      const task = await this.taskRepo.getTaskById(taskId);
+      if (!task || task.projectId !== projectId) {
+        throw new ValidationError('Invalid task or project');
+      }
 
-    const timeEntry: TimeEntry = {
-      id: uuidv4(),
-      taskId,
-      projectId,
-      userId,
-      description,
-      startTime,
-      endTime,
-      duration: roundedDuration,
-      billable,
-      invoiceId: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      billableRate: rate,
-      tags,
-      source: 'manual'
-    };
+      // Calculate duration if not provided
+      let calculatedDuration = duration;
+      if (!calculatedDuration) {
+        calculatedDuration = Math.floor((endTime.getTime() - startTime.getTime()) / 1000);
+      }
 
-    return this.timeEntryRepo.createTimeEntry(timeEntry);
+      // Apply rounding
+      const settings = await this.getUserSettings(userId);
+      const roundedDuration = this.applyTimeRounding(calculatedDuration, settings.roundingInterval);
+
+      // Get billable rate if not provided
+      let rate = billableRate;
+      if (billable && rate === null) {
+        const rateInfo = await this.getBillableRate(userId, projectId);
+        rate = rateInfo?.hourlyRate || null;
+      }
+
+      const timeEntry: TimeEntry = {
+        id: uuidv4(),
+        taskId,
+        projectId,
+        userId,
+        description,
+        startTime,
+        endTime,
+        duration: roundedDuration,
+        billable,
+        invoiceId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        billableRate: rate,
+        tags,
+        source: 'manual',
+        version: 1
+      };
+
+      return this.timeEntryRepo.createTimeEntry(timeEntry);
+    });
   }
 
   // Update an existing time entry

@@ -3,14 +3,14 @@ import { cookies } from 'next/headers';
 
 export async function POST() {
   try {
-    // Clear the auth cookie
-    cookies().delete('auth-token');
-    
+    // Clear the token cookie
+    cookies().delete('token');
+
     return NextResponse.json({ message: 'Logged out successfully' });
   } catch (error) {
     console.error('Logout error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Error during logout' },
       { status: 500 }
     );
   }

@@ -1,12 +1,24 @@
 import { NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
-import bcrypt from 'bcryptjs';
+import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 import { cookies } from 'next/headers';
-import { sign } from 'jsonwebtoken';
+
+const prisma = new PrismaClient();
 
 export async function POST(request: Request) {
   try {
     const { email, password } = await request.json();
+    console.log('Login attempt for email:', email);
+
+    // Validate input
+    if (!email || !password) {
+      console.log('Missing email or password');
+      return NextResponse.json(
+        { error: 'Email and password are required' },
+        { status: 400 }
+      );
+    }
 
     // Find user
     const user = await prisma.user.findUnique({
@@ -14,44 +26,56 @@ export async function POST(request: Request) {
     });
 
     if (!user) {
+      console.log('User not found');
       return NextResponse.json(
         { error: 'Invalid credentials' },
         { status: 401 }
       );
     }
+
+    console.log('User found with role:', user.role);
 
     // Verify password
-    const isValidPassword = await bcrypt.compare(password, user.password);
-    if (!isValidPassword) {
+    const passwordMatch = await bcrypt.compare(password, user.password);
+    if (!passwordMatch) {
+      console.log('Password does not match');
       return NextResponse.json(
         { error: 'Invalid credentials' },
         { status: 401 }
       );
     }
 
-    // Create JWT token
-    const token = sign(
+    // Generate JWT token
+    const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET || 'your-secret-key',
-      { expiresIn: '1d' }
+      { expiresIn: '24h' }
     );
 
+    console.log('Token generated successfully');
+
     // Set cookie
-    cookies().set('auth-token', token, {
+    cookies().set('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 86400, // 1 day
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60, // 24 hours
       path: '/',
     });
 
-    // Return user data (excluding password)
+    // Remove password from response
     const { password: _, ...userWithoutPassword } = user;
-    return NextResponse.json({ user: userWithoutPassword });
+
+    console.log('Login successful, returning user data');
+    
+    return NextResponse.json({
+      message: 'Login successful',
+      user: userWithoutPassword,
+    });
   } catch (error) {
     console.error('Login error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Error during login' },
       { status: 500 }
     );
   }

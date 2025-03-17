@@ -18,6 +18,8 @@ interface TimeEntriesFilter {
 
 export default class TimeEntryRepository {
   private pool: Pool;
+  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  private cache: Map<string, { data: any; timestamp: number }> = new Map();
 
   constructor() {
     this.pool = new Pool({
@@ -27,36 +29,77 @@ export default class TimeEntryRepository {
     });
   }
 
-  // Create a new time entry
+  // Cache helper methods
+  private getCached<T>(key: string): T | null {
+    const cached = this.cache.get(key);
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+      return cached.data as T;
+    }
+    return null;
+  }
+
+  private setCached(key: string, data: any): void {
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now()
+    });
+  }
+
+  private clearCache(): void {
+    this.cache.clear();
+  }
+
+  // Create a new time entry with transaction
   public async createTimeEntry(entry: TimeEntry): Promise<TimeEntry> {
-    const query = `
-      INSERT INTO time_entries(
-        id, task_id, project_id, user_id, description, 
-        start_time, end_time, duration, billable, 
-        invoice_id, billable_rate, tags, source
-      ) 
-      VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-      RETURNING *
-    `;
+    const client = await this.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      const query = `
+        INSERT INTO time_entries(
+          id, task_id, project_id, user_id, description, 
+          start_time, end_time, duration, billable, 
+          invoice_id, billable_rate, tags, source, version
+        ) 
+        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        RETURNING *
+      `;
 
-    const values = [
-      entry.id || uuidv4(),
-      entry.taskId,
-      entry.projectId,
-      entry.userId,
-      entry.description,
-      entry.startTime,
-      entry.endTime,
-      entry.duration,
-      entry.billable,
-      entry.invoiceId,
-      entry.billableRate,
-      entry.tags,
-      entry.source
-    ];
+      const values = [
+        entry.id || uuidv4(),
+        entry.taskId,
+        entry.projectId,
+        entry.userId,
+        entry.description,
+        entry.startTime,
+        entry.endTime,
+        entry.duration,
+        entry.billable,
+        entry.invoiceId,
+        entry.billableRate,
+        entry.tags,
+        entry.source,
+        entry.version
+      ];
 
-    const result = await this.pool.query(query, values);
-    return this.mapTimeEntryFromDb(result.rows[0]);
+      const result = await client.query(query, values);
+      
+      // Update materialized view
+      await client.query('SELECT refresh_time_entries_summary()');
+      
+      await client.query('COMMIT');
+      
+      const timeEntry = this.mapTimeEntryFromDb(result.rows[0]);
+      this.clearCache();
+      
+      return timeEntry;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw new Error(`Failed to create time entry: ${error.message}`);
+    } finally {
+      client.release();
+    }
   }
 
   // Get a time entry by ID
@@ -135,77 +178,102 @@ export default class TimeEntryRepository {
     await this.pool.query(query, [timeEntryId]);
   }
 
-  // Get time entries for a user with filtering
+  // Get time entries with caching and pagination
   public async getUserTimeEntries(
     userId: string,
     filters: TimeEntriesFilter
   ): Promise<{ entries: TimeEntry[], total: number, page: number, limit: number }> {
-    // Build WHERE clauses based on filters
-    const whereClauses: string[] = [`user_id = $1`];
-    const values: any[] = [userId];
-    let paramIndex = 2;
+    const cacheKey = `user_entries_${userId}_${JSON.stringify(filters)}`;
+    const cached = this.getCached(cacheKey);
     
-    if (filters.projectId) {
-      whereClauses.push(`project_id = $${paramIndex}`);
-      values.push(filters.projectId);
-      paramIndex++;
+    if (cached) {
+      return cached;
     }
+
+    const client = await this.pool.connect();
     
-    if (filters.taskId) {
-      whereClauses.push(`task_id = $${paramIndex}`);
-      values.push(filters.taskId);
-      paramIndex++;
+    try {
+      // Build WHERE clauses based on filters
+      const whereClauses: string[] = [`user_id = $1`];
+      const values: any[] = [userId];
+      let paramIndex = 2;
+      
+      if (filters.projectId) {
+        whereClauses.push(`project_id = $${paramIndex}`);
+        values.push(filters.projectId);
+        paramIndex++;
+      }
+      
+      if (filters.taskId) {
+        whereClauses.push(`task_id = $${paramIndex}`);
+        values.push(filters.taskId);
+        paramIndex++;
+      }
+      
+      if (filters.startDate) {
+        whereClauses.push(`start_time >= $${paramIndex}`);
+        values.push(filters.startDate);
+        paramIndex++;
+      }
+      
+      if (filters.endDate) {
+        whereClauses.push(`(end_time <= $${paramIndex} OR end_time IS NULL)`);
+        values.push(filters.endDate);
+        paramIndex++;
+      }
+      
+      if (filters.billable !== undefined) {
+        whereClauses.push(`billable = $${paramIndex}`);
+        values.push(filters.billable);
+        paramIndex++;
+      }
+      
+      // Calculate pagination
+      const offset = (filters.page - 1) * filters.limit;
+      
+      // Get total count using materialized view if possible
+      let countQuery = `
+        SELECT COUNT(*) FROM time_entries
+        WHERE ${whereClauses.join(' AND ')}
+      `;
+      
+      if (!filters.startDate && !filters.endDate) {
+        countQuery = `
+          SELECT COALESCE(SUM(total_entries), 0)
+          FROM time_entries_summary
+          WHERE user_id = $1
+          ${filters.projectId ? 'AND project_id = $2' : ''}
+        `;
+      }
+      
+      const countResult = await client.query(countQuery, values);
+      const total = parseInt(countResult.rows[0].count || countResult.rows[0].sum || '0', 10);
+      
+      // Get entries with pagination
+      const query = `
+        SELECT * FROM time_entries
+        WHERE ${whereClauses.join(' AND ')}
+        ORDER BY start_time DESC
+        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+      `;
+      
+      values.push(filters.limit, offset);
+      
+      const result = await client.query(query, values);
+      const entries = result.rows.map(row => this.mapTimeEntryFromDb(row));
+      
+      const response = {
+        entries,
+        total,
+        page: filters.page,
+        limit: filters.limit
+      };
+      
+      this.setCached(cacheKey, response);
+      return response;
+    } finally {
+      client.release();
     }
-    
-    if (filters.startDate) {
-      whereClauses.push(`start_time >= $${paramIndex}`);
-      values.push(filters.startDate);
-      paramIndex++;
-    }
-    
-    if (filters.endDate) {
-      whereClauses.push(`(end_time <= $${paramIndex} OR end_time IS NULL)`);
-      values.push(filters.endDate);
-      paramIndex++;
-    }
-    
-    if (filters.billable !== undefined) {
-      whereClauses.push(`billable = $${paramIndex}`);
-      values.push(filters.billable);
-      paramIndex++;
-    }
-    
-    // Calculate pagination
-    const offset = (filters.page - 1) * filters.limit;
-    
-    // Get total count
-    const countQuery = `
-      SELECT COUNT(*) FROM time_entries
-      WHERE ${whereClauses.join(' AND ')}
-    `;
-    
-    const countResult = await this.pool.query(countQuery, values);
-    const total = parseInt(countResult.rows[0].count, 10);
-    
-    // Get entries with pagination
-    const query = `
-      SELECT * FROM time_entries
-      WHERE ${whereClauses.join(' AND ')}
-      ORDER BY start_time DESC
-      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
-    `;
-    
-    values.push(filters.limit, offset);
-    
-    const result = await this.pool.query(query, values);
-    const entries = result.rows.map(row => this.mapTimeEntryFromDb(row));
-    
-    return {
-      entries,
-      total,
-      page: filters.page,
-      limit: filters.limit
-    };
   }
 
   // Get current running timer for a user
@@ -352,6 +420,43 @@ export default class TimeEntryRepository {
     }
     
     return this.mapBillableRateFromDb(result.rows[0]);
+  }
+
+  // Get time entries summary using materialized view
+  public async getTimeEntriesSummary(
+    userId: string,
+    startDate: Date,
+    endDate: Date
+  ): Promise<TimeTrackingSummary> {
+    const cacheKey = `summary_${userId}_${startDate.toISOString()}_${endDate.toISOString()}`;
+    const cached = this.getCached(cacheKey);
+    
+    if (cached) {
+      return cached;
+    }
+
+    const client = await this.pool.connect();
+    
+    try {
+      const query = `
+        SELECT 
+          SUM(total_entries) as total_entries,
+          SUM(total_duration) as total_duration,
+          SUM(billable_duration) as billable_duration,
+          SUM(billable_amount) as billable_amount
+        FROM time_entries_summary
+        WHERE user_id = $1
+        AND date BETWEEN $2 AND $3
+      `;
+      
+      const result = await client.query(query, [userId, startDate, endDate]);
+      const summary = this.mapSummaryFromDb(result.rows[0]);
+      
+      this.setCached(cacheKey, summary);
+      return summary;
+    } finally {
+      client.release();
+    }
   }
 
   // Helper methods to map database rows to typed objects

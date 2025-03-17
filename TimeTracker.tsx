@@ -95,10 +95,12 @@ const TimeTracker = () => {
   const [manualEndTime, setManualEndTime] = useState('');
   const [manualStartDate, setManualStartDate] = useState('');
   const [manualEndDate, setManualEndDate] = useState('');
+  const [timeDiff, setTimeDiff] = useState(0);
   
   // Timer interval reference
   const timerIntervalRef = useRef(null);
   const timerStartTimeRef = useRef(null);
+  const syncIntervalRef = useRef(null);
 
   // Format time in HH:MM:SS format
   const formatTime = (seconds) => {
@@ -136,23 +138,46 @@ const TimeTracker = () => {
     }
   }, [selectedProject, selectedTask]);
 
-  // Start timer
+  // Add server time sync function
+  const syncWithServer = async () => {
+    try {
+      const response = await fetch('/api/server-time');
+      const serverTime = await response.json();
+      const localTime = new Date().getTime();
+      setTimeDiff(serverTime - localTime);
+    } catch (error) {
+      console.error('Failed to sync with server time:', error);
+    }
+  };
+
+  // Add periodic sync
+  useEffect(() => {
+    syncWithServer();
+    syncIntervalRef.current = setInterval(syncWithServer, 60000); // Sync every minute
+    
+    return () => {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Modify startTimer function
   const startTimer = () => {
     if (!selectedProject || !selectedTask) {
       alert('Please select a project and task first');
       return;
     }
     
-    // Generate a new timer ID
     const newTimerId = Date.now().toString();
     setCurrentTimerId(newTimerId);
     
-    // Set timer start time
-    timerStartTimeRef.current = new Date();
+    // Adjust start time with time difference
+    const adjustedStartTime = new Date(Date.now() + timeDiff);
+    timerStartTimeRef.current = adjustedStartTime;
     
-    // Start the timer interval
     timerIntervalRef.current = setInterval(() => {
-      const now = new Date();
+      const now = new Date(Date.now() + timeDiff);
       const elapsedSeconds = Math.floor((now - timerStartTimeRef.current) / 1000);
       setElapsedTime(elapsedSeconds);
     }, 1000);
@@ -160,16 +185,15 @@ const TimeTracker = () => {
     setIsTimerRunning(true);
   };
 
-  // Stop timer
-  const stopTimer = () => {
+  // Modify stopTimer function
+  const stopTimer = async () => {
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = null;
     }
     
-    // Only add time entry if timer was running for at least 1 second
     if (elapsedTime > 0) {
-      const endTime = new Date();
+      const endTime = new Date(Date.now() + timeDiff);
       const newEntry = {
         id: currentTimerId,
         taskId: selectedTask,
@@ -182,10 +206,30 @@ const TimeTracker = () => {
         tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag !== '')
       };
       
-      setTimeEntries([newEntry, ...timeEntries]);
+      try {
+        // Add optimistic update
+        setTimeEntries([newEntry, ...timeEntries]);
+        
+        // Send to server
+        const response = await fetch('/api/time-entries', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(newEntry),
+        });
+        
+        if (!response.ok) {
+          // Rollback on failure
+          setTimeEntries(timeEntries);
+          throw new Error('Failed to save time entry');
+        }
+      } catch (error) {
+        console.error('Error saving time entry:', error);
+        alert('Failed to save time entry. Please try again.');
+      }
     }
     
-    // Reset timer state
     setIsTimerRunning(false);
     setElapsedTime(0);
     setCurrentTimerId(null);

@@ -13,48 +13,186 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   
-  // Check if user is authenticated on initial load
+  // Check if user is already logged in on mount
   useEffect(() => {
-    const checkAuthStatus = async () => {
-      try {
-        // Check if user is authenticated using AuthService
-        const isAuthenticated = AuthService.isAuthenticated();
-        
-        if (!isAuthenticated) {
-          setCurrentUser(null);
-          setLoading(false);
-          return;
-        }
-        
-        // Get current user from local storage or API
-        const user = AuthService.getCurrentUser();
-        setCurrentUser(user);
-        setLoading(false);
-      } catch (error) {
-        console.error('Auth check error:', error);
-        setCurrentUser(null);
-        setLoading(false);
-      }
-    };
-    
-    checkAuthStatus();
+    const token = localStorage.getItem('token');
+    if (token) {
+      fetchCurrentUser(token);
+    } else {
+      setLoading(false);
+    }
   }, []);
   
+  // Fetch current user data with better error handling
+  const fetchCurrentUser = async (token) => {
+    try {
+      const response = await fetch('/api/auth/me', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.message || 'Failed to fetch user data');
+      }
+      
+      const data = await response.json();
+      
+      if (!data.user) {
+        throw new Error('No user data received');
+      }
+      
+      // Validate required user fields
+      if (!data.user.id || !data.user.email || !data.user.role) {
+        throw new Error('Invalid user data received');
+      }
+      
+      setCurrentUser(data.user);
+    } catch (error) {
+      console.error('Error fetching user:', error);
+      await logout();
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+  
   // Login function
-  const login = async (email, password, rememberMe = false) => {
+  const login = async (token, refreshToken) => {
     try {
       setError(null);
       
-      // Use AuthService login
-      const response = await AuthService.login(email, password, rememberMe);
+      // Validate tokens
+      if (!token || !refreshToken) {
+        throw new Error('Invalid authentication tokens received');
+      }
+
+      // Store tokens
+      localStorage.setItem('token', token);
+      localStorage.setItem('refreshToken', refreshToken);
       
-      setCurrentUser(response.user);
-      return response.user;
+      // Fetch user data
+      await fetchCurrentUser(token);
+      
+      // Clear any existing errors
+      setError(null);
     } catch (error) {
-      setError(error.message || 'Failed to login. Please check your credentials.');
+      localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
+      setCurrentUser(null);
+      setError(error.message || 'Login failed. Please try again.');
       throw error;
     }
   };
+  
+  // Logout function
+  const logout = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const refreshToken = localStorage.getItem('refreshToken');
+      
+      if (token) {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ refreshToken })
+        });
+      }
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
+      setCurrentUser(null);
+    }
+  };
+  
+  // Refresh token function
+  const refreshAuthToken = async () => {
+    try {
+      const refreshToken = localStorage.getItem('refreshToken');
+      if (!refreshToken) {
+        throw new Error('No refresh token available');
+      }
+      
+      const response = await fetch('/api/auth/refresh-token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ refreshToken })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to refresh token');
+      }
+      
+      const data = await response.json();
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('refreshToken', data.refreshToken);
+      return data.token;
+    } catch (error) {
+      console.error('Token refresh error:', error);
+      logout();
+      throw error;
+    }
+  };
+  
+  // Axios interceptor for token refresh
+  useEffect(() => {
+    const requestInterceptor = async (config) => {
+      const token = localStorage.getItem('token');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+      return config;
+    };
+    
+    const responseInterceptor = async (error) => {
+      const originalRequest = error.config;
+      if (error.response?.status === 401 && !originalRequest._retry) {
+        originalRequest._retry = true;
+        try {
+          const newToken = await refreshAuthToken();
+          originalRequest.headers.Authorization = `Bearer ${newToken}`;
+          return fetch(originalRequest);
+        } catch (refreshError) {
+          return Promise.reject(refreshError);
+        }
+      }
+      return Promise.reject(error);
+    };
+    
+    // Add interceptors to fetch requests
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const [resource, config] = args;
+      
+      // Apply request interceptor
+      const modifiedConfig = await requestInterceptor(config || {});
+      
+      try {
+        const response = await originalFetch(resource, modifiedConfig);
+        if (response.status === 401) {
+          return responseInterceptor({ 
+            response, 
+            config: modifiedConfig 
+          });
+        }
+        return response;
+      } catch (error) {
+        return responseInterceptor(error);
+      }
+    };
+    
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, []);
   
   // Register function
   const register = async (userData) => {
@@ -69,17 +207,6 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       setError(error.message || 'Registration failed. Please try again.');
       throw error;
-    }
-  };
-  
-  // Logout function
-  const logout = async () => {
-    try {
-      await AuthService.logout();
-      setCurrentUser(null);
-    } catch (error) {
-      console.error('Logout error:', error);
-      setCurrentUser(null);
     }
   };
   
@@ -130,12 +257,12 @@ export const AuthProvider = ({ children }) => {
     }
   };
   
-  // Check if user has a specific role
-  const hasRole = (role) => {
-    return currentUser?.role === role;
-  };
-  
+  // Handle user role with validation
   const handleUserRole = (user) => {
+    if (!user || !user.role) {
+      throw new Error('Invalid user data - role not found');
+    }
+    
     // Map role to specific dashboard route
     const roleRouteMap = {
       'admin': '/admin/dashboard',
@@ -143,10 +270,30 @@ export const AuthProvider = ({ children }) => {
       'patient': '/patient/dashboard'
     };
     
-    // Set role-specific data in localStorage for easy access
-    localStorage.setItem('userRole', user.role);
+    const defaultRoute = '/dashboard';
     
-    return roleRouteMap[user.role] || '/';
+    // Validate role exists in map
+    if (!roleRouteMap[user.role]) {
+      console.warn(`Unknown role "${user.role}" - redirecting to default dashboard`);
+      return defaultRoute;
+    }
+    
+    // Set role-specific data in localStorage
+    try {
+      localStorage.setItem('userRole', user.role);
+    } catch (error) {
+      console.error('Failed to store user role:', error);
+    }
+    
+    return roleRouteMap[user.role];
+  };
+  
+  // Check if user has specific role with validation
+  const hasRole = (role) => {
+    if (!role || typeof role !== 'string') {
+      return false;
+    }
+    return currentUser?.role === role;
   };
   
   // Context value
@@ -167,7 +314,7 @@ export const AuthProvider = ({ children }) => {
   
   return (
     <AuthContext.Provider value={value}>
-      {children}
+      {!loading && children}
     </AuthContext.Provider>
   );
 };
