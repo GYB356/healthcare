@@ -1,29 +1,40 @@
+'use client';
+
 import { useSession } from 'next-auth/react';
-import { useRouter } from 'next/router';
+import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 
-export function ProtectedRoute({ children }: { children: React.ReactNode }) {
+interface ProtectedRouteProps {
+  children: React.ReactNode;
+  allowedRoles?: string[];
+}
+
+export default function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
   const { data: session, status } = useSession();
   const router = useRouter();
 
   useEffect(() => {
-    if (status === 'loading') return; // Do nothing while loading
+    if (status === 'loading') return;
+
     if (!session) {
-      router.push('/login');
+      router.push('/auth/login');
+      return;
     }
-  }, [session, status, router]);
+
+    if (allowedRoles && !allowedRoles.includes(session.user.role)) {
+      router.push(`/dashboard/${session.user.role.toLowerCase()}`);
+    }
+  }, [session, status, router, allowedRoles]);
 
   if (status === 'loading') {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
+    return <div>Loading...</div>;
   }
 
   if (!session) {
+    return null;
+  }
+
+  if (allowedRoles && !allowedRoles.includes(session.user.role)) {
     return null;
   }
 

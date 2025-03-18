@@ -1,55 +1,66 @@
-const express = require('express');
+import express from 'express';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcrypt';
+import { Pool } from 'pg';
+import { v4 as uuidv4 } from 'uuid';
+import { User } from '../models/User';
+import { authenticate, generateToken, generateRefreshToken } from '../middleware/auth';
+import { validateLogin, validateRegistration } from '../middleware/validation';
+import { auditLog } from '../middleware/audit';
+import config from '../config/jwt';
+import rateLimit from 'express-rate-limit';
+import speakeasy from 'speakeasy';
+
 const router = express.Router();
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const { User } = require('../models/User');
-const { authenticate, generateToken, generateRefreshToken } = require('../middleware/auth');
-const { validateLogin, validateRegistration } = require('../middleware/validation');
-const { auditLog } = require('../middleware/audit');
-const config = require('../config/jwt');
-const rateLimit = require('express-rate-limit');
-const speakeasy = require('speakeasy');
+
+// Initialize PostgreSQL pool
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
 
 // Register new user
 router.post('/register', validateRegistration, async (req, res) => {
+  const client = await pool.connect();
   try {
     const { email, password, firstName, lastName, role = 'PATIENT' } = req.body;
 
-    // Check if email exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Email already registered' 
-      });
+    // Check if user exists
+    const existingUser = await client.query(
+      'SELECT * FROM users WHERE email = $1',
+      [email]
+    );
+    
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({ error: 'User already exists' });
     }
 
     // Hash password
-    const hashedPassword = await bcrypt.hash(password, 12);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     // Create user
-    const user = await User.create({
-      email,
-      password: hashedPassword,
-      firstName,
-      lastName,
-      role
-    });
+    const result = await client.query(
+      'INSERT INTO users (id, email, password, firstName, lastName, role) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, email, firstName, lastName, role',
+      [uuidv4(), email, hashedPassword, firstName, lastName, role]
+    );
 
     // Generate tokens
+    const user = result.rows[0];
     const token = generateToken(user);
-    const refreshToken = generateRefreshToken(user._id);
+    const refreshToken = generateRefreshToken(user.id);
 
     // Store refresh token
-    await User.findByIdAndUpdate(user._id, {
+    await User.findByIdAndUpdate(user.id, {
       $push: { refreshTokens: { token: refreshToken } }
     });
 
     // Log registration
-    auditLog('user:register', { userId: user._id, role: user.role });
+    auditLog('user:register', { userId: user.id, role: user.role });
 
     // Remove password from response
-    const userObject = user.toObject();
+    const userObject = user;
     delete userObject.password;
 
     res.status(201).json({
@@ -61,7 +72,9 @@ router.post('/register', validateRegistration, async (req, res) => {
     });
   } catch (error) {
     console.error('Registration error:', error);
-    res.status(500).json({ success: false, message: 'Failed to register user' });
+    res.status(500).json({ error: 'Failed to register user' });
+  } finally {
+    client.release();
   }
 });
 
@@ -106,67 +119,40 @@ const verify2FA = async (req, res, next) => {
 
 // Login with enhanced security
 router.post('/login', loginLimiter, validateLogin, verify2FA, async (req, res) => {
+  const client = await pool.connect();
   try {
     const { email, password, twoFactorCode } = req.body;
 
-    // Find user by email
-    const user = await User.findOne({ email }).select('+password');
-    if (!user) {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Invalid credentials',
-        attemptsRemaining: req.rateLimit.remaining
-      });
+    // Get user
+    const result = await client.query(
+      'SELECT * FROM users WHERE email = $1',
+      [email]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid credentials' });
     }
-
-    // Check if account is locked
-    if (user.isLocked) {
-      const lockoutTime = new Date(user.lockUntil);
-      if (lockoutTime > new Date()) {
-        return res.status(401).json({ 
-          success: false, 
-          message: 'Account is locked. Please try again later.',
-          lockUntil: lockoutTime
-        });
-      }
-      // Reset lock if lockout period has expired
-      user.isLocked = false;
-      user.loginAttempts = 0;
-      await user.save();
-    }
+    
+    const user = result.rows[0];
 
     // Check password
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) {
-      // Increment failed attempts
-      user.loginAttempts += 1;
-      
-      // Lock account after 5 failed attempts
-      if (user.loginAttempts >= 5) {
-        user.isLocked = true;
-        user.lockUntil = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
-      }
-      
-      await user.save();
-      
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Invalid credentials',
-        attemptsRemaining: 5 - user.loginAttempts
-      });
+      return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     // Reset login attempts on successful login
-    user.loginAttempts = 0;
-    user.lastLogin = new Date();
-    await user.save();
+    await User.findByIdAndUpdate(user.id, {
+      loginAttempts: 0,
+      lastLogin: new Date()
+    });
 
-    // Generate tokens
+    // Generate token
     const token = generateToken(user);
-    const refreshToken = generateRefreshToken(user._id);
+    const refreshToken = generateRefreshToken(user.id);
 
     // Store refresh token with device info
-    await User.findByIdAndUpdate(user._id, {
+    await User.findByIdAndUpdate(user.id, {
       $push: { 
         refreshTokens: { 
           token: refreshToken,
@@ -179,7 +165,7 @@ router.post('/login', loginLimiter, validateLogin, verify2FA, async (req, res) =
 
     // Log login with security details
     auditLog('user:login', { 
-      userId: user._id, 
+      userId: user.id, 
       role: user.role,
       ip: req.ip,
       userAgent: req.headers['user-agent'],
@@ -187,7 +173,7 @@ router.post('/login', loginLimiter, validateLogin, verify2FA, async (req, res) =
     });
 
     // Remove sensitive data from response
-    const userObject = user.toObject();
+    const userObject = user;
     delete userObject.password;
     delete userObject.twoFactorSecret;
     delete userObject.refreshTokens;
@@ -202,11 +188,9 @@ router.post('/login', loginLimiter, validateLogin, verify2FA, async (req, res) =
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Login failed',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    res.status(500).json({ error: 'Failed to login' });
+  } finally {
+    client.release();
   }
 });
 
@@ -300,4 +284,21 @@ router.get('/me', authenticate, async (req, res) => {
   }
 });
 
-module.exports = router;
+// Verify token endpoint
+router.get('/verify', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (!token) {
+      return res.status(401).json({ error: 'No token provided' });
+    }
+    
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    res.json({ valid: true, user: decoded });
+  } catch (error) {
+    console.error('Token verification error:', error);
+    res.status(401).json({ error: 'Invalid token' });
+  }
+});
+
+export default router;

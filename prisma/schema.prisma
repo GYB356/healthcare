@@ -10,103 +10,209 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum UserRole {
-  ADMIN
-  DOCTOR
+enum Role {
   PATIENT
-}
-
-enum AppointmentStatus {
-  SCHEDULED
-  COMPLETED
-  CANCELLED
+  DOCTOR
+  NURSE
+  STAFF
+  ADMIN
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  name      String
-  role      UserRole @default(PATIENT)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  doctorAppointments    Appointment[] @relation("DoctorAppointments")
-  patientAppointments   Appointment[] @relation("PatientAppointments")
-  doctorMedicalRecords  MedicalRecord[] @relation("DoctorMedicalRecords")
-  patientMedicalRecords MedicalRecord[] @relation("PatientMedicalRecords")
-  prescriptionsGiven    Prescription[] @relation("DoctorPrescriptions")
-  prescriptionsReceived Prescription[] @relation("PatientPrescriptions")
-  department           Department?    @relation(fields: [departmentId], references: [id])
-  departmentId         String?
-
-  @@map("users")
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  password      String
+  image         String?
+  role          Role      @default(PATIENT)
+  patient       Patient?
+  healthcareProvider HealthcareProvider?
+  sentMessages     Message[] @relation("SentMessages")
+  receivedMessages Message[] @relation("ReceivedMessages")
+  auditLogs      AuditLog[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }
 
-model Department {
-  id        String   @id @default(cuid())
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  doctors   User[]
+model Patient {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dateOfBirth    DateTime
+  gender         String
+  address        String?
+  phone          String?
+  emergencyContact String?
+  medicalRecords MedicalRecord[]
+  appointments   Appointment[]
+  invoices       Invoice[]
+  insurance      Insurance?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
 
-  @@map("departments")
+model HealthcareProvider {
+  id           String    @id @default(cuid())
+  userId       String    @unique
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  specialty    String
+  licenseNumber String
+  department   String?
+  schedule     Schedule[]
+  appointments Appointment[]
+  medicalRecords MedicalRecord[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 model Appointment {
-  id        String            @id @default(cuid())
-  date      DateTime
-  time      String
-  status    AppointmentStatus @default(SCHEDULED)
-  notes     String?
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
-
-  // Relations
-  doctor     User   @relation("DoctorAppointments", fields: [doctorId], references: [id])
-  doctorId   String
-  patient    User   @relation("PatientAppointments", fields: [patientId], references: [id])
-  patientId  String
-
-  @@map("appointments")
+  id          String    @id @default(cuid())
+  patientId   String
+  patient     Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  providerId  String
+  provider    HealthcareProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  startTime   DateTime
+  endTime     DateTime
+  status      String    // "scheduled", "confirmed", "canceled", "completed"
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 model MedicalRecord {
-  id          String   @id @default(cuid())
-  date        DateTime @default(now())
-  type        String
-  diagnosis   String
-  prescription String?
+  id          String    @id @default(cuid())
+  patientId   String
+  patient     Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  providerId  String
+  provider    HealthcareProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  date        DateTime
+  diagnosis   String?
+  treatment   String?
+  medications String?
   notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // Relations
-  doctor     User   @relation("DoctorMedicalRecords", fields: [doctorId], references: [id])
-  doctorId   String
-  patient    User   @relation("PatientMedicalRecords", fields: [patientId], references: [id])
-  patientId  String
-
-  @@map("medical_records")
+  attachments Attachment[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  auditLogs   AuditLog[]
 }
 
-model Prescription {
-  id          String   @id @default(cuid())
-  medication  String
-  dosage      String
-  frequency   String
-  startDate   DateTime
-  endDate     DateTime
+model Attachment {
+  id              String    @id @default(cuid())
+  medicalRecordId String
+  medicalRecord   MedicalRecord @relation(fields: [medicalRecordId], references: [id], onDelete: Cascade)
+  fileName        String
+  fileType        String
+  fileUrl         String
+  uploadedBy      String
+  createdAt       DateTime  @default(now())
+}
+
+model Insurance {
+  id              String    @id @default(cuid())
+  patientId       String    @unique
+  patient         Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  provider        String
+  policyNumber    String
+  groupNumber     String?
+  effectiveDate   DateTime
+  expirationDate  DateTime?
+  coverageDetails String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model Invoice {
+  id          String    @id @default(cuid())
+  patientId   String
+  patient     Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  amount      Float
+  status      String    // "pending", "paid", "overdue", "canceled"
+  dueDate     DateTime
+  description String?
+  items       InvoiceItem[]
+  payments    Payment[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model InvoiceItem {
+  id          String    @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Int
+  unitPrice   Float
+  total       Float
+  createdAt   DateTime  @default(now())
+}
+
+model Payment {
+  id          String    @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount      Float
+  method      String    // "credit", "debit", "cash", "insurance"
+  status      String    // "pending", "completed", "failed", "refunded"
+  transactionId String?
   notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+}
 
-  // Relations
-  doctor     User   @relation("DoctorPrescriptions", fields: [doctorId], references: [id])
-  doctorId   String
-  patient    User   @relation("PatientPrescriptions", fields: [patientId], references: [id])
-  patientId  String
+model Schedule {
+  id          String    @id @default(cuid())
+  providerId  String
+  provider    HealthcareProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  startTime   DateTime
+  endTime     DateTime
+  isRecurring Boolean   @default(false)
+  recurrencePattern String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
 
-  @@map("prescriptions")
+model Message {
+  id          String    @id @default(cuid())
+  senderId    String
+  sender      User      @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId  String
+  receiver    User      @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+  content     String
+  isRead      Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+}
+
+model MedicalDevice {
+  id          String    @id @default(cuid())
+  name        String
+  deviceType  String
+  serialNumber String
+  status      String    // "active", "maintenance", "retired"
+  lastCalibration DateTime?
+  readings    DeviceReading[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model DeviceReading {
+  id          String    @id @default(cuid())
+  deviceId    String
+  device      MedicalDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  readingData Json
+  timestamp   DateTime  @default(now())
+}
+
+model AuditLog {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id])
+  action          String
+  resourceType    String
+  resourceId      String?
+  medicalRecordId String?
+  medicalRecord   MedicalRecord? @relation(fields: [medicalRecordId], references: [id])
+  ipAddress       String?
+  userAgent       String?
+  timestamp       DateTime  @default(now())
+  details         String?
 }

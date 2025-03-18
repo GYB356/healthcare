@@ -1,170 +1,91 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
+import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-}
+import {
+  HomeIcon,
+  CalendarIcon,
+  ClipboardDocumentListIcon,
+  CreditCardIcon,
+  UserIcon,
+  ArrowLeftOnRectangleIcon,
+} from '@heroicons/react/24/outline';
+import { signOut } from 'next-auth/react';
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-  const router = useRouter();
+  const { data: session } = useSession();
+  const pathname = usePathname();
 
-  useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const res = await fetch('/api/auth/me', {
-          credentials: 'include',
-        });
-
-        if (!res.ok) {
-          throw new Error('Not authenticated');
-        }
-
-        const data = await res.json();
-        setUser(data.user);
-        
-        // Redirect to role-specific dashboard if on main dashboard
-        if (window.location.pathname === '/dashboard') {
-          switch (data.user.role) {
-            case 'ADMIN':
-              router.push('/dashboard/admin');
-              break;
-            case 'DOCTOR':
-              router.push('/dashboard/doctor');
-              break;
-            case 'PATIENT':
-              router.push('/dashboard/patient');
-              break;
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching user:', error);
-        router.push('/auth/login');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchUser();
-  }, [router]);
-
-  const handleLogout = async () => {
-    try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'include',
-      });
-      router.push('/auth/login');
-    } catch (error) {
-      console.error('Error logging out:', error);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-2xl">Loading...</div>
-      </div>
-    );
-  }
-
-  const renderNavLinks = () => {
-    switch (user?.role) {
-      case 'ADMIN':
-        return (
-          <>
-            <Link href="/dashboard/admin" className="text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 border-transparent hover:border-blue-500">
-              Dashboard
-            </Link>
-            <Link href="/users" className="text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 border-transparent hover:border-blue-500">
-              User Management
-            </Link>
-            <Link href="/departments" className="text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 border-transparent hover:border-blue-500">
-              Departments
-            </Link>
-          </>
-        );
-      case 'DOCTOR':
-        return (
-          <>
-            <Link href="/dashboard/doctor" className="text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 border-transparent hover:border-blue-500">
-              Dashboard
-            </Link>
-            <Link href="/appointments" className="text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 border-transparent hover:border-blue-500">
-              Appointments
-            </Link>
-            <Link href="/patients" className="text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 border-transparent hover:border-blue-500">
-              Patients
-            </Link>
-            <Link href="/medical-records" className="text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 border-transparent hover:border-blue-500">
-              Medical Records
-            </Link>
-          </>
-        );
-      case 'PATIENT':
-        return (
-          <>
-            <Link href="/dashboard/patient" className="text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 border-transparent hover:border-blue-500">
-              Dashboard
-            </Link>
-            <Link href="/my-appointments" className="text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 border-transparent hover:border-blue-500">
-              My Appointments
-            </Link>
-            <Link href="/my-records" className="text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 border-transparent hover:border-blue-500">
-              Medical Records
-            </Link>
-            <Link href="/book-appointment" className="text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 border-transparent hover:border-blue-500">
-              Book Appointment
-            </Link>
-          </>
-        );
-      default:
-        return null;
-    }
-  };
+  const navigation = [
+    { name: 'Dashboard', href: `/dashboard/${session?.user?.role}`, icon: HomeIcon },
+    { name: 'Appointments', href: `/dashboard/${session?.user?.role}/appointments`, icon: CalendarIcon },
+    { name: 'Medical Records', href: `/dashboard/${session?.user?.role}/records`, icon: ClipboardDocumentListIcon },
+    { name: 'Billing', href: `/dashboard/${session?.user?.role}/billing`, icon: CreditCardIcon },
+    { name: 'Profile', href: `/dashboard/${session?.user?.role}/profile`, icon: UserIcon },
+  ];
 
   return (
     <div className="min-h-screen bg-gray-100">
-      <nav className="bg-white shadow-lg">
-        <div className="max-w-7xl mx-auto px-4">
-          <div className="flex justify-between h-16">
-            <div className="flex">
-              <div className="flex-shrink-0 flex items-center">
-                <Link href="/dashboard" className="text-xl font-bold text-blue-600">
-                  Healthcare Portal
-                </Link>
-              </div>
-              <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
-                {renderNavLinks()}
-              </div>
+      <div className="flex">
+        {/* Sidebar */}
+        <div className="hidden md:flex md:w-64 md:flex-col">
+          <div className="flex flex-col flex-grow pt-5 bg-white overflow-y-auto">
+            <div className="flex items-center flex-shrink-0 px-4">
+              <h1 className="text-xl font-semibold text-gray-900">HealthcareSync</h1>
             </div>
-            <div className="flex items-center">
-              <span className="text-gray-700 mr-4">Welcome, {user?.name}</span>
-              <button
-                onClick={handleLogout}
-                className="bg-red-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-              >
-                Logout
-              </button>
+            <div className="mt-5 flex-grow flex flex-col">
+              <nav className="flex-1 px-2 pb-4 space-y-1">
+                {navigation.map((item) => {
+                  const isActive = pathname === item.href;
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      className={`group flex items-center px-2 py-2 text-sm font-medium rounded-md ${
+                        isActive
+                          ? 'bg-gray-100 text-gray-900'
+                          : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                      }`}
+                    >
+                      <item.icon
+                        className={`mr-3 flex-shrink-0 h-6 w-6 ${
+                          isActive ? 'text-gray-500' : 'text-gray-400 group-hover:text-gray-500'
+                        }`}
+                        aria-hidden="true"
+                      />
+                      {item.name}
+                    </Link>
+                  );
+                })}
+                <button
+                  onClick={() => signOut()}
+                  className="w-full group flex items-center px-2 py-2 text-sm font-medium rounded-md text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                >
+                  <ArrowLeftOnRectangleIcon
+                    className="mr-3 flex-shrink-0 h-6 w-6 text-gray-400 group-hover:text-gray-500"
+                    aria-hidden="true"
+                  />
+                  Sign Out
+                </button>
+              </nav>
             </div>
           </div>
         </div>
-      </nav>
 
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        {children}
-      </main>
+        {/* Main content */}
+        <div className="flex-1">
+          <div className="py-6">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
+              {children}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 } 

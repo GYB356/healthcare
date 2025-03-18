@@ -1,44 +1,27 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import prisma from '@/lib/prisma';
 import { verify } from 'jsonwebtoken';
 import { cookies } from 'next/headers';
 
-const prisma = new PrismaClient();
-
 export async function GET() {
   try {
-    const token = cookies().get('token')?.value;
+    const session = await getServerSession(authOptions);
 
-    if (!token) {
-      return NextResponse.json(
-        { error: 'Not authenticated' },
-        { status: 401 }
-      );
+    if (!session || session.user.role !== 'patient') {
+      return new NextResponse('Unauthorized', { status: 401 });
     }
 
-    // Verify token
-    const decoded = verify(token, process.env.JWT_SECRET || 'your-secret-key') as {
-      userId: string;
-      role: string;
-    };
-
-    if (decoded.role !== 'PATIENT') {
-      return NextResponse.json(
-        { error: 'Not authorized' },
-        { status: 403 }
-      );
-    }
-
-    // Get appointments for the patient
     const appointments = await prisma.appointment.findMany({
       where: {
-        patientId: decoded.userId,
+        patientId: session.user.id,
       },
       include: {
         doctor: {
           select: {
+            id: true,
             name: true,
-            department: true,
           },
         },
       },
@@ -47,23 +30,10 @@ export async function GET() {
       },
     });
 
-    // Format appointments
-    const formattedAppointments = appointments.map(appointment => ({
-      id: appointment.id,
-      doctorName: appointment.doctor.name,
-      department: appointment.doctor.department,
-      date: appointment.date.toISOString().split('T')[0],
-      time: appointment.time,
-      status: appointment.status,
-    }));
-
-    return NextResponse.json({ appointments: formattedAppointments });
+    return NextResponse.json({ appointments });
   } catch (error) {
-    console.error('Error fetching appointments:', error);
-    return NextResponse.json(
-      { error: 'Error fetching appointments' },
-      { status: 500 }
-    );
+    console.error('Error fetching patient appointments:', error);
+    return new NextResponse('Internal Server Error', { status: 500 });
   }
 }
 

@@ -1,46 +1,104 @@
 // User types
+export type UserRole = 'patient' | 'doctor' | 'nurse' | 'staff' | 'administrator';
+
 export interface User {
-  _id: string;
-  name: string;
+  id: string;
   email: string;
-  role: 'admin' | 'doctor' | 'patient' | 'staff';
+  name: string;
+  role: UserRole;
+  department?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 // Appointment types
 export interface Appointment {
-  _id: string;
-  doctor: string | User;
-  patient: string | User;
+  id: string;
+  patientId: string;
+  doctorId: string;
   date: string;
   time: string;
-  duration: number;
-  status: 'scheduled' | 'in-progress' | 'completed' | 'cancelled';
-  reasonForVisit: string;
-  notes: string;
+  status: 'scheduled' | 'completed' | 'cancelled';
+  type: string;
+  notes?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 // Medical report types
-export interface MedicalInfo {
-  symptoms: string[];
+export interface MedicalRecord {
+  id: string;
+  patientId: string;
+  doctorId: string;
   diagnosis: string;
-  recommendations: string[];
+  treatment: string;
   medications: string[];
-  followUpNeeded: boolean;
-}
-
-export interface Report {
-  _id: string;
-  appointmentId: string | Appointment;
-  doctor: string | User;
-  report: string;
-  medicalInfo: MedicalInfo;
-  followUpQuestions?: string;
+  notes: string;
+  attachments: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BillingRecord {
+  id: string;
+  patientId: string;
+  amount: number;
+  status: 'pending' | 'paid' | 'cancelled';
+  dueDate: string;
+  description: string;
+  insuranceInfo?: {
+    provider: string;
+    policyNumber: string;
+    coverage: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StaffSchedule {
+  id: string;
+  staffId: string;
+  department: string;
+  shift: 'morning' | 'afternoon' | 'night';
+  date: string;
+  status: 'scheduled' | 'completed' | 'cancelled';
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Message {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  content: string;
+  read: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DeviceData {
+  id: string;
+  deviceId: string;
+  patientId: string;
+  type: string;
+  data: Record<string, any>;
+  timestamp: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AnalyticsData {
+  totalPatients: number;
+  totalAppointments: number;
+  revenue: number;
+  appointmentsByStatus: Record<string, number>;
+  patientsByDepartment: Record<string, number>;
+  recentActivity: Array<{
+    type: string;
+    description: string;
+    timestamp: string;
+  }>;
 }
 
 // Accessibility audit types

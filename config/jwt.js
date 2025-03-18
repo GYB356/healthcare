@@ -1,11 +1,27 @@
-module.exports = {
-    secret: process.env.JWT_SECRET || 'your-dev-secret-key',
-    refreshSecret: process.env.JWT_REFRESH_SECRET || 'your-refresh-dev-secret',
-    tokenExpiration: process.env.JWT_EXPIRES_IN || '1h',
-    refreshExpiration: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
-    cookieOptions: {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
+export default {
+  // Access token settings
+  secret: process.env.JWT_SECRET,
+  expiresIn: '1h',
+  
+  // Refresh token settings
+  refreshSecret: process.env.JWT_REFRESH_SECRET,
+  refreshExpiresIn: '7d',
+  
+  // Token types
+  tokenTypes: {
+    ACCESS: 'access',
+    REFRESH: 'refresh'
+  },
+  
+  // Token options
+  options: {
+    accessToken: {
+      algorithm: 'HS256',
+      expiresIn: '1h'
+    },
+    refreshToken: {
+      algorithm: 'HS256',
+      expiresIn: '7d'
     }
-  };
+  }
+};

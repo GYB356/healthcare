@@ -1,94 +1,102 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcrypt';
-import { validateEmail, validatePassword, validateName } from '@/lib/validation';
+import { hash } from 'bcryptjs';
+import prisma from '@/lib/prisma';
+import { z } from 'zod';
 
-const prisma = new PrismaClient();
+// Validation schema
+const registerSchema = z.object({
+  firstName: z.string().min(2, 'First name is required'),
+  lastName: z.string().min(2, 'Last name is required'),
+  email: z.string().email('Invalid email address'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+  phone: z.string().optional(),
+  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format'),
+  role: z.enum(['PATIENT', 'DOCTOR', 'NURSE', 'ADMIN', 'STAFF']).default('PATIENT'),
+});
 
-export async function POST(request: Request) {
+export async function POST(req: Request) {
   try {
-    const { name, email, password, role } = await request.json();
+    const body = await req.json();
+    const validatedData = registerSchema.parse(body);
 
-    // Validate input
-    if (!name || !email || !password || !role) {
-      return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
-      );
-    }
-
-    // Validate email
-    const emailValidation = validateEmail(email);
-    if (!emailValidation.isValid) {
-      return NextResponse.json(
-        { error: emailValidation.error },
-        { status: 400 }
-      );
-    }
-
-    // Validate password
-    const passwordValidation = validatePassword(password);
-    if (!passwordValidation.isValid) {
-      return NextResponse.json(
-        { error: passwordValidation.error },
-        { status: 400 }
-      );
-    }
-
-    // Validate name
-    const nameValidation = validateName(name);
-    if (!nameValidation.isValid) {
-      return NextResponse.json(
-        { error: nameValidation.error },
-        { status: 400 }
-      );
-    }
-
-    // Validate role
-    const validRoles = ['ADMIN', 'DOCTOR', 'PATIENT'];
-    if (!validRoles.includes(role)) {
-      return NextResponse.json(
-        { error: 'Invalid role' },
-        { status: 400 }
-      );
-    }
-
-    // Check if user already exists
+    // Check if email already exists
     const existingUser = await prisma.user.findUnique({
-      where: { email },
+      where: { email: validatedData.email },
     });
 
     if (existingUser) {
       return NextResponse.json(
-        { error: 'User already exists' },
+        { error: 'Email already registered' },
         { status: 400 }
       );
     }
 
     // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await hash(validatedData.password, 12);
 
     // Create user
     const user = await prisma.user.create({
       data: {
-        name,
-        email,
+        email: validatedData.email,
         password: hashedPassword,
-        role,
+        firstName: validatedData.firstName,
+        lastName: validatedData.lastName,
+        phone: validatedData.phone,
+        dateOfBirth: new Date(validatedData.dateOfBirth),
+        role: validatedData.role,
+        isActive: true,
+        profile: {
+          create: {
+            bio: '',
+            specialization: validatedData.role === 'DOCTOR' ? 'General' : undefined,
+            licenseNumber: validatedData.role === 'DOCTOR' || validatedData.role === 'NURSE' ? '' : undefined,
+          },
+        },
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        createdAt: true,
       },
     });
 
-    // Remove password from response
-    const { password: _, ...userWithoutPassword } = user;
+    // Create default settings for the user
+    await prisma.userSettings.create({
+      data: {
+        userId: user.id,
+        emailNotifications: true,
+        smsNotifications: false,
+        theme: 'light',
+        language: 'en',
+      },
+    });
 
-    return NextResponse.json(
-      { message: 'User created successfully', user: userWithoutPassword },
-      { status: 201 }
-    );
+    // Log the registration
+    await prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        action: 'REGISTER',
+        details: `User registered with role ${user.role}`,
+      },
+    });
+
+    return NextResponse.json({
+      message: 'Registration successful',
+      user,
+    });
   } catch (error) {
     console.error('Registration error:', error);
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: error.errors[0].message },
+        { status: 400 }
+      );
+    }
     return NextResponse.json(
-      { error: 'Error creating user' },
+      { error: 'Failed to create account' },
       { status: 500 }
     );
   }

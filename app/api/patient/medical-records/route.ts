@@ -1,4 +1,29 @@
 import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import prisma from '@/lib/prisma';
+
+export async function GET() {
+  try {
+    const session = await getServerSession(authOptions);
+
+    if (!session || session.user.role !== 'patient') {
+      return new NextResponse('Unauthorized', { status: 401 });
+    }
+
+    const records = await prisma.medicalRecord.findMany({
+      where: {
+        patientId: session.user.id,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    return NextResponse.json({ records });
+  } catch (error) {
+    console.error('Error fetching medical records:', error);
+import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { verify } from 'jsonwebtoken';
 import { cookies } from 'next/headers';

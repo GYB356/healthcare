@@ -1,82 +1,82 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { verify } from 'jsonwebtoken';
+import { verifyJwtToken } from '@/lib/auth';
 
-// Paths that don't require authentication
-const publicPaths = ['/auth/login', '/auth/register', '/api/auth/login', '/api/auth/register'];
-
-// Role-based path access
-const roleBasedPaths = {
-  ADMIN: ['/dashboard/admin'],
-  DOCTOR: ['/dashboard/doctor'],
-  PATIENT: ['/dashboard/patient'],
-};
+/**
+ * SIMPLIFIED MIDDLEWARE
+ * This is a simplified middleware that just logs requests but doesn't redirect.
+ * Use this temporarily to see if middleware is causing the refresh loops.
+ */
 
 export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-  console.log('Middleware processing path:', pathname);
-
-  // Allow access to public paths
-  if (publicPaths.includes(pathname)) {
-    console.log('Public path accessed:', pathname);
-    return NextResponse.next();
+  const path = request.nextUrl.pathname;
+  
+  // Public paths that don't require authentication
+  const isPublicPath = path === '/login' || path === '/register' || path === '/forgot-password';
+  
+  // Get token from cookies
+  const token = request.cookies.get('token')?.value || '';
+  
+  // Redirect logic for public paths
+  if (isPublicPath && token) {
+    return NextResponse.redirect(new URL('/dashboard', request.url));
   }
-
-  // Check for authentication token
-  const token = request.cookies.get('token')?.value;
-  console.log('Token present:', !!token);
-
-  if (!token) {
-    console.log('No token found, redirecting to login');
-    return NextResponse.redirect(new URL('/auth/login', request.url));
+  
+  // Protected routes logic
+  if (!isPublicPath && !token) {
+    return NextResponse.redirect(new URL('/login', request.url));
   }
-
-  try {
-    // Verify and decode the token
-    const decoded = verify(token, process.env.JWT_SECRET || 'your-secret-key') as {
-      userId: string;
-      email: string;
-      role: 'ADMIN' | 'DOCTOR' | 'PATIENT';
-    };
-
-    console.log('Token decoded, user role:', decoded.role);
-
-    // Check role-based access
-    const userRole = decoded.role;
-    const isRoleBasedPath = Object.values(roleBasedPaths).flat().includes(pathname);
-
-    if (isRoleBasedPath) {
-      const allowedPaths = roleBasedPaths[userRole] || [];
-      if (!allowedPaths.includes(pathname)) {
-        console.log('User not authorized for this path, redirecting to appropriate dashboard');
-        // Redirect to appropriate dashboard based on role
-        switch (userRole) {
-          case 'ADMIN':
-            return NextResponse.redirect(new URL('/dashboard/admin', request.url));
-          case 'DOCTOR':
-            return NextResponse.redirect(new URL('/dashboard/doctor', request.url));
-          case 'PATIENT':
-            return NextResponse.redirect(new URL('/dashboard/patient', request.url));
-          default:
-            return NextResponse.redirect(new URL('/dashboard', request.url));
+  
+  // Role-based access control
+  if (!isPublicPath && token) {
+    try {
+      const decodedToken = await verifyJwtToken(token);
+      const userRole = decodedToken.role;
+      
+      // Admin paths
+      if (path.startsWith('/admin') && userRole !== 'ADMIN') {
+        return NextResponse.redirect(new URL('/dashboard', request.url));
+      }
+      
+      // Doctor paths
+      if (path.startsWith('/doctor') && userRole !== 'DOCTOR' && userRole !== 'ADMIN') {
+        return NextResponse.redirect(new URL('/dashboard', request.url));
+      }
+      
+      // Nurse paths
+      if (path.startsWith('/nurse') && userRole !== 'NURSE' && userRole !== 'DOCTOR' && userRole !== 'ADMIN') {
+        return NextResponse.redirect(new URL('/dashboard', request.url));
+      }
+      
+      // Staff paths
+      if (path.startsWith('/staff') && userRole !== 'STAFF' && userRole !== 'ADMIN') {
+        return NextResponse.redirect(new URL('/dashboard', request.url));
+      }
+      
+      // Medical records security - only allow providers and the patient themselves
+      if (path.startsWith('/medical-records/') && 
+          userRole !== 'ADMIN' && 
+          userRole !== 'DOCTOR' && 
+          userRole !== 'NURSE') {
+        // Extract patient ID from path
+        const patientId = path.split('/')[2];
+        
+        // If not the patient's own records, redirect
+        if (decodedToken.patientId !== patientId) {
+          return NextResponse.redirect(new URL('/dashboard', request.url));
         }
       }
+    } catch (error) {
+      // Invalid token, redirect to login
+      return NextResponse.redirect(new URL('/login', request.url));
     }
-
-    console.log('Access granted');
-    return NextResponse.next();
-  } catch (error) {
-    console.error('Token verification failed:', error);
-    return NextResponse.redirect(new URL('/auth/login', request.url));
   }
+  
+  return NextResponse.next();
 }
 
-// Configure the middleware to run on specific paths
 export const config = {
   matcher: [
-    '/dashboard/:path*',
-    '/auth/login',
-    '/auth/register',
-    '/api/auth/:path*',
+    '/((?!api|_next/static|_next/image|favicon.ico|public).*)',
   ],
 }; 

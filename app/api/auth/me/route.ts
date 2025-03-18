@@ -1,53 +1,28 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-import { verify } from 'jsonwebtoken';
-import { cookies } from 'next/headers';
-
-const prisma = new PrismaClient();
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 
 export async function GET() {
   try {
-    // Get token from cookies
-    const token = cookies().get('token')?.value;
+    const session = await getServerSession(authOptions);
 
-    if (!token) {
+    if (!session || !session.user) {
       return NextResponse.json(
         { error: 'Not authenticated' },
         { status: 401 }
       );
     }
 
-    // Verify token
-    const decoded = verify(token, process.env.JWT_SECRET || 'your-secret-key') as {
-      userId: string;
-      email: string;
-      role: string;
-    };
-
-    // Get user from database
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-      },
+    return NextResponse.json({
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+      role: session.user.role,
     });
-
-    if (!user) {
-      return NextResponse.json(
-        { error: 'User not found' },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json({ user });
   } catch (error) {
-    console.error('Error in /api/auth/me:', error);
     return NextResponse.json(
-      { error: 'Not authenticated' },
-      { status: 401 }
+      { error: 'Internal server error' },
+      { status: 500 }
     );
   }
 } 

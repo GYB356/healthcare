@@ -1,15 +1,14 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import mongoose from "mongoose";
 import cors from "cors";
 import bodyParser from "body-parser";
 import dotenv from "dotenv";
-import authRoutes from "./routes/auth";
-import userRoutes from "./routes/user";
-import projectRoutes from "./routes/project";
-import taskRoutes from "./routes/task";
-import notificationRoutes from "./routes/notification";
+import authRoutes from "./routes/auth.js";
+import userRoutes from "./routes/user.js";
+import projectRoutes from "./routes/project.js";
+import taskRoutes from "./routes/task.js";
+import notificationRoutes from "./routes/notification.js";
 import { Pool } from 'pg';
 import rateLimit from 'express-rate-limit';
 import { v4 as uuidv4 } from 'uuid';
@@ -18,10 +17,18 @@ dotenv.config();
 
 const app = express();
 const server = createServer(app);
-const io = new Server(server, { cors: { origin: "http://localhost:3006" } });
+const io = new Server(server, { cors: { origin: process.env.FRONTEND_URL || "http://localhost:3007" } });
+
+// Initialize PostgreSQL pool
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
 
 app.use(cors({
-  origin: "http://localhost:3006",
+  origin: process.env.FRONTEND_URL || "http://localhost:3007",
   credentials: true
 }));
 app.use(bodyParser.json());
@@ -140,22 +147,11 @@ app.put('/api/time-entries/:id', timeEntryLimiter, async (req, res) => {
   }
 });
 
-mongoose
-  .connect(process.env.MONGO_URI!, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => {
-    console.log("Connected to MongoDB");
-  })
-  .catch((error) => {
-    console.error("Error connecting to MongoDB:", error);
-  });
-
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 });
 
+// Fix the TypeScript error by removing the type annotation
 export const sendNotification = (message: string) => {
   io.emit("notification", message);
 };

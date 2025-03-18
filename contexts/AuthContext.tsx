@@ -1,15 +1,13 @@
 "use client";
 import { createContext, useState, useEffect, ReactNode, useContext } from "react";
-import { useRouter } from "next/navigation";
-import api from "../lib/api";
-import { toast } from "react-toastify";
 
 // Define user type
 interface User {
   id: string;
   email: string;
-  role: "admin" | "user";
-  name?: string;
+  role: "patient" | "doctor" | "nurse" | "staff" | "administrator";
+  name: string;
+  department?: string;
 }
 
 // Define authentication context
@@ -17,62 +15,85 @@ interface AuthContextProps {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
-  hasRole: (role: string) => boolean;
+  logout: () => void;
+  isAuthenticated: boolean;
+  hasRole: (role: User['role']) => boolean;
 }
 
-const AuthContext = createContext<AuthContextProps | null>(null);
+const AuthContext = createContext<AuthContextProps | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const router = useRouter();
 
   useEffect(() => {
-    const fetchUser = async () => {
+    // Check for existing session
+    const checkAuth = async () => {
       try {
-        const { data } = await api.get("/auth/me");
-        setUser(data);
+        const token = localStorage.getItem('token');
+        if (token) {
+          const response = await fetch('/api/auth/me', {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          });
+          if (response.ok) {
+            const userData = await response.json();
+            setUser(userData);
+          } else {
+            localStorage.removeItem('token');
+          }
+        }
       } catch (error) {
-        setUser(null);
-        router.push("/auth/login");
+        console.error('Auth check failed:', error);
       } finally {
         setLoading(false);
       }
     };
-    fetchUser();
+
+    checkAuth();
   }, []);
 
   const login = async (email: string, password: string) => {
     try {
-      const { data } = await api.post("/auth/login", { email, password });
-      setUser(data.user);
-      toast.success("Login successful!");
-      router.push("/dashboard");
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+
+      if (!response.ok) {
+        throw new Error('Login failed');
+      }
+
+      const { token, user: userData } = await response.json();
+      localStorage.setItem('token', token);
+      setUser(userData);
     } catch (error) {
-      toast.error("Login failed. Please check your credentials.");
-      console.error("Login failed", error);
+      console.error('Login error:', error);
+      throw error;
     }
   };
 
-  const logout = async () => {
-    try {
-      await api.post("/auth/logout");
-      setUser(null);
-      toast.info("You have been logged out.");
-      router.push("/auth/login");
-    } catch (error) {
-      toast.error("Logout failed. Please try again.");
-    }
+  const logout = () => {
+    localStorage.removeItem('token');
+    setUser(null);
   };
 
-  const hasRole = (role: string): boolean => {
+  const hasRole = (role: User['role']) => {
     return user?.role === role;
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, hasRole }}>
-      {!loading && children}
+    <AuthContext.Provider value={{
+      user,
+      loading,
+      login,
+      logout,
+      isAuthenticated: !!user,
+      hasRole
+    }}>
+      {children}
     </AuthContext.Provider>
   );
 };
@@ -80,8 +101,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 // Custom hook for using auth context
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error("useAuth must be used within an AuthProvider");
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
 };
