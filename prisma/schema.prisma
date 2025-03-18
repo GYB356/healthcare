@@ -18,6 +18,41 @@ enum Role {
   ADMIN
 }
 
+enum ResourceType {
+  PATIENT
+  MEDICAL_RECORD
+  APPOINTMENT
+  BILLING
+  USER
+  MESSAGE
+  DEVICE
+  BACKUP
+  AUDIT_LOG
+}
+
+enum AuditAction {
+  VIEW
+  CREATE
+  UPDATE
+  DELETE
+  EXPORT
+  PRINT
+  ACCESS_ATTEMPT
+  LOGIN
+  LOGOUT
+}
+
+enum AuditSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum AuditStatus {
+  SUCCESS
+  FAILURE
+}
+
 model User {
   id            String    @id @default(cuid())
   name          String?
@@ -203,16 +238,22 @@ model DeviceReading {
 }
 
 model AuditLog {
-  id              String    @id @default(cuid())
-  userId          String
-  user            User      @relation(fields: [userId], references: [id])
-  action          String
-  resourceType    String
-  resourceId      String?
-  medicalRecordId String?
-  medicalRecord   MedicalRecord? @relation(fields: [medicalRecordId], references: [id])
-  ipAddress       String?
-  userAgent       String?
-  timestamp       DateTime  @default(now())
-  details         String?
+  id                String         @id @default(cuid())
+  userId            String
+  user              User           @relation(fields: [userId], references: [id])
+  action            AuditAction
+  resourceType      ResourceType
+  resourceId        String?
+  medicalRecordId   String?
+  medicalRecord     MedicalRecord? @relation(fields: [medicalRecordId], references: [id])
+  ipAddress         String?
+  userAgent         String?
+  timestamp         DateTime       @default(now())
+  details           String?
+  severity          AuditSeverity  @default(LOW)
+  status            AuditStatus    @default(SUCCESS)
+  sessionId         String?
+  integrityHash     String?
+  archived          Boolean        @default(false)
+  archivedAt        DateTime?
 }
