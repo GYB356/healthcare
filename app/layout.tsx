@@ -1,14 +1,11 @@
-import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
-import { AuthProvider } from '@/contexts/AuthContext';
-import '@/styles/globals.css';
-import Navigation from '../components/Navigation';
-import Providers from './providers';
+import { Inter } from 'next/font/google'
+import './globals.css'
+import { Toaster } from "@/components/ui/toaster"
 
 const inter = Inter({ subsets: ['latin'] })
 
-export const metadata: Metadata = {
-  title: 'HealthcareSync',
+export const metadata = {
+  title: 'Healthcare Management System',
   description: 'A comprehensive healthcare management system',
 }
 
@@ -20,14 +17,8 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <AuthProvider>
-          <Providers>
-            <Navigation />
-            <main className="min-h-screen p-4 md:p-8">
-              {children}
-            </main>
-          </Providers>
-        </AuthProvider>
+        {children}
+        <Toaster />
       </body>
     </html>
   )

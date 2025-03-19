@@ -10,250 +10,209 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Role {
-  PATIENT
-  DOCTOR
-  NURSE
-  STAFF
-  ADMIN
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
 }
 
-enum ResourceType {
-  PATIENT
-  MEDICAL_RECORD
-  APPOINTMENT
-  BILLING
-  USER
-  MESSAGE
-  DEVICE
-  BACKUP
-  AUDIT_LOG
-}
-
-enum AuditAction {
-  VIEW
-  CREATE
-  UPDATE
-  DELETE
-  EXPORT
-  PRINT
-  ACCESS_ATTEMPT
-  LOGIN
-  LOGOUT
-}
-
-enum AuditSeverity {
-  LOW
-  MEDIUM
-  HIGH
-}
-
-enum AuditStatus {
-  SUCCESS
-  FAILURE
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model User {
   id            String    @id @default(cuid())
   name          String?
-  email         String    @unique
+  email         String?   @unique
   emailVerified DateTime?
-  password      String
   image         String?
-  role          Role      @default(PATIENT)
-  patient       Patient?
-  healthcareProvider HealthcareProvider?
-  sentMessages     Message[] @relation("SentMessages")
-  receivedMessages Message[] @relation("ReceivedMessages")
-  auditLogs      AuditLog[]
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  password      String?
+  role          Role      @default(USER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  notifications Notification[]
+  doctorProfile    DoctorProfile?
+  patientProfile   PatientProfile?
+  medicalRecords   MedicalRecord[]   @relation("DoctorRecords")
+  appointments     Appointment[]     @relation("DoctorAppointments")
+  patientRecords   MedicalRecord[]   @relation("PatientRecords")
+  patientAppointments Appointment[]  @relation("PatientAppointments")
+  auditLogs        AuditLog[]
+
+  @@map("users")
 }
 
-model Patient {
-  id             String    @id @default(cuid())
-  userId         String    @unique
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+model DoctorProfile {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  specialization String
+  license        String
+  availability   Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("doctor_profiles")
+}
+
+model PatientProfile {
+  id             String   @id @default(cuid())
+  userId         String   @unique
   dateOfBirth    DateTime
-  gender         String
-  address        String?
-  phone          String?
-  emergencyContact String?
-  medicalRecords MedicalRecord[]
-  appointments   Appointment[]
-  invoices       Invoice[]
-  insurance      Insurance?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-}
+  bloodType      String?
+  allergies      String[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-model HealthcareProvider {
-  id           String    @id @default(cuid())
-  userId       String    @unique
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  specialty    String
-  licenseNumber String
-  department   String?
-  schedule     Schedule[]
-  appointments Appointment[]
-  medicalRecords MedicalRecord[]
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-}
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-model Appointment {
-  id          String    @id @default(cuid())
-  patientId   String
-  patient     Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  providerId  String
-  provider    HealthcareProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
-  startTime   DateTime
-  endTime     DateTime
-  status      String    // "scheduled", "confirmed", "canceled", "completed"
-  notes       String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  @@map("patient_profiles")
 }
 
 model MedicalRecord {
-  id          String    @id @default(cuid())
+  id          String   @id @default(cuid())
   patientId   String
-  patient     Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  providerId  String
-  provider    HealthcareProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
-  date        DateTime
-  diagnosis   String?
-  treatment   String?
-  medications String?
+  doctorId    String
+  diagnosis   String
+  prescription String?
   notes       String?
-  attachments Attachment[]
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
   auditLogs   AuditLog[]
+
+  patient     User     @relation("PatientRecords", fields: [patientId], references: [id])
+  doctor      User     @relation("DoctorRecords", fields: [doctorId], references: [id])
+
+  @@map("medical_records")
 }
 
-model Attachment {
-  id              String    @id @default(cuid())
-  medicalRecordId String
-  medicalRecord   MedicalRecord @relation(fields: [medicalRecordId], references: [id], onDelete: Cascade)
-  fileName        String
-  fileType        String
-  fileUrl         String
-  uploadedBy      String
-  createdAt       DateTime  @default(now())
-}
-
-model Insurance {
-  id              String    @id @default(cuid())
-  patientId       String    @unique
-  patient         Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  provider        String
-  policyNumber    String
-  groupNumber     String?
-  effectiveDate   DateTime
-  expirationDate  DateTime?
-  coverageDetails String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-}
-
-model Invoice {
-  id          String    @id @default(cuid())
-  patientId   String
-  patient     Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  amount      Float
-  status      String    // "pending", "paid", "overdue", "canceled"
-  dueDate     DateTime
-  description String?
-  items       InvoiceItem[]
-  payments    Payment[]
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-}
-
-model InvoiceItem {
-  id          String    @id @default(cuid())
-  invoiceId   String
-  invoice     Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  description String
-  quantity    Int
-  unitPrice   Float
-  total       Float
-  createdAt   DateTime  @default(now())
-}
-
-model Payment {
-  id          String    @id @default(cuid())
-  invoiceId   String
-  invoice     Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  amount      Float
-  method      String    // "credit", "debit", "cash", "insurance"
-  status      String    // "pending", "completed", "failed", "refunded"
-  transactionId String?
+model Appointment {
+  id          String   @id @default(cuid())
+  date        DateTime
+  startTime   String
+  endTime     String
+  status      AppointmentStatus @default(SCHEDULED)
   notes       String?
-  createdAt   DateTime  @default(now())
-}
+  patientId   String
+  doctorId    String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  billings    Billing[]
+  auditLogs   AuditLog[]
+  
+  patient     User     @relation("PatientAppointments", fields: [patientId], references: [id])
+  doctor      User     @relation("DoctorAppointments", fields: [doctorId], references: [id])
 
-model Schedule {
-  id          String    @id @default(cuid())
-  providerId  String
-  provider    HealthcareProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
-  startTime   DateTime
-  endTime     DateTime
-  isRecurring Boolean   @default(false)
-  recurrencePattern String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-}
-
-model Message {
-  id          String    @id @default(cuid())
-  senderId    String
-  sender      User      @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
-  receiverId  String
-  receiver    User      @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
-  content     String
-  isRead      Boolean   @default(false)
-  createdAt   DateTime  @default(now())
-}
-
-model MedicalDevice {
-  id          String    @id @default(cuid())
-  name        String
-  deviceType  String
-  serialNumber String
-  status      String    // "active", "maintenance", "retired"
-  lastCalibration DateTime?
-  readings    DeviceReading[]
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-}
-
-model DeviceReading {
-  id          String    @id @default(cuid())
-  deviceId    String
-  device      MedicalDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  readingData Json
-  timestamp   DateTime  @default(now())
+  @@map("appointments")
 }
 
 model AuditLog {
-  id                String         @id @default(cuid())
-  userId            String
-  user              User           @relation(fields: [userId], references: [id])
-  action            AuditAction
-  resourceType      ResourceType
-  resourceId        String?
-  medicalRecordId   String?
-  medicalRecord     MedicalRecord? @relation(fields: [medicalRecordId], references: [id])
-  ipAddress         String?
-  userAgent         String?
-  timestamp         DateTime       @default(now())
-  details           String?
-  severity          AuditSeverity  @default(LOW)
-  status            AuditStatus    @default(SUCCESS)
-  sessionId         String?
-  integrityHash     String?
-  archived          Boolean        @default(false)
-  archivedAt        DateTime?
+  id          String   @id @default(cuid())
+  userId      String
+  entityId    String?
+  entityType  String
+  action      String
+  details     String?
+  createdAt   DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], map: "audit_logs_userId_fkey")
+  medicalRecord MedicalRecord? @relation(fields: [entityId], references: [id], map: "audit_logs_medicalRecordId_fkey")
+  appointment   Appointment?   @relation(fields: [entityId], references: [id], map: "audit_logs_appointmentId_fkey")
+
+  @@map("audit_logs")
+}
+
+model Notification {
+  id          String    @id @default(cuid())
+  userId      String
+  type        String    // EMAIL, SMS, IN_APP
+  title       String
+  message     String
+  isRead      Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Billing {
+  id              String    @id @default(cuid())
+  appointmentId   String    @unique
+  amount          Float
+  status          String    @default("PENDING") // PENDING, PAID, OVERDUE, CANCELLED
+  dueDate         DateTime
+  paidAt          DateTime?
+  stripeInvoiceId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  appointment     Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+enum Role {
+  ADMIN
+  DOCTOR
+  NURSE
+  STAFF
+  PATIENT
+  USER
+}
+
+enum RecordType {
+  CONSULTATION
+  PRESCRIPTION
+  LAB_RESULT
+  IMAGING
+  SURGERY
+  OTHER
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  VIEW
+}
+
+enum EntityType {
+  MEDICAL_RECORD
+  APPOINTMENT
+  USER
+  DOCTOR_PROFILE
+  PATIENT_PROFILE
 }

@@ -1,49 +1,87 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import { addMinutes, format, parse, setHours, setMinutes } from 'date-fns';
 
 const prisma = new PrismaClient();
 
-// Define available time slots (9 AM to 5 PM, 1-hour intervals)
-const DEFAULT_SLOTS = [
-  '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00'
-];
+// Define business hours (9 AM to 5 PM)
+const BUSINESS_START_HOUR = 9;
+const BUSINESS_END_HOUR = 17;
+const SLOT_DURATION = 30; // minutes
 
 export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(request.url);
-    const doctorId = searchParams.get('doctorId');
-    const date = searchParams.get('date');
-
-    if (!doctorId || !date) {
+    const session = await getServerSession(authOptions);
+    
+    if (!session) {
       return NextResponse.json(
-        { error: 'Doctor ID and date are required' },
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+    const dateStr = searchParams.get('date');
+
+    if (!dateStr) {
+      return NextResponse.json(
+        { error: 'Date parameter is required' },
         { status: 400 }
       );
     }
 
-    // Get booked appointments for the specified doctor and date
-    const bookedAppointments = await prisma.appointment.findMany({
+    const date = new Date(dateStr);
+    const startTime = setHours(setMinutes(date, 0), BUSINESS_START_HOUR);
+    const endTime = setHours(setMinutes(date, 0), BUSINESS_END_HOUR);
+
+    // Get existing appointments for the date
+    const existingAppointments = await prisma.appointment.findMany({
       where: {
-        doctorId,
-        date: new Date(date),
+        date: {
+          equals: date,
+        },
         status: 'SCHEDULED',
       },
       select: {
         time: true,
+        duration: true,
       },
     });
 
-    // Get booked time slots
-    const bookedSlots = bookedAppointments.map(appointment => appointment.time);
+    // Generate all possible time slots
+    const slots = [];
+    let currentTime = startTime;
 
-    // Filter out booked slots from available slots
-    const availableSlots = DEFAULT_SLOTS.filter(slot => !bookedSlots.includes(slot));
+    while (currentTime < endTime) {
+      const timeStr = format(currentTime, 'HH:mm');
+      
+      // Check if slot is available
+      const isBooked = existingAppointments.some(apt => {
+        const aptTime = parse(apt.time, 'HH:mm', new Date());
+        const aptEndTime = addMinutes(aptTime, apt.duration);
+        const slotEndTime = addMinutes(currentTime, SLOT_DURATION);
+        
+        return (
+          (currentTime >= aptTime && currentTime < aptEndTime) ||
+          (slotEndTime > aptTime && slotEndTime <= aptEndTime)
+        );
+      });
 
-    return NextResponse.json({ slots: availableSlots });
+      slots.push({
+        time: timeStr,
+        available: !isBooked,
+      });
+
+      currentTime = addMinutes(currentTime, SLOT_DURATION);
+    }
+
+    return NextResponse.json({ slots });
   } catch (error) {
     console.error('Error fetching available slots:', error);
     return NextResponse.json(
-      { error: 'Error fetching available slots' },
+      { error: 'Failed to fetch available slots' },
       { status: 500 }
     );
   }

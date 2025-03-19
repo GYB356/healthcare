@@ -1,205 +1,285 @@
  "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { headers } from 'next/headers';
-import { logMedicalRecordAccess, logAttachmentDownload, logMedicalRecordSearch } from '@/lib/medical-records-utils';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+import { Search, Plus } from "lucide-react";
+import { toast } from "sonner";
+import Link from "next/link";
+import { format } from "date-fns";
 
-// ... existing imports ...
+interface MedicalRecord {
+  id: string;
+  date: string;
+  type: string;
+  description: string;
+  patientId: string;
+  patient: {
+    name: string;
+    dateOfBirth: string;
+  };
+  doctorId: string;
+  doctor: {
+    name: string;
+    specialization: string;
+  };
+  attachments: Array<{
+    id: string;
+    name: string;
+    type: string;
+    url: string;
+  }>;
+}
+
+interface PaginationData {
+  total: number;
+  pages: number;
+  page: number;
+  limit: number;
+}
 
 export default function MedicalRecordsPage() {
-  const { data: session, status } = useSession();
+  const { data: session } = useSession();
   const router = useRouter();
   const [records, setRecords] = useState<MedicalRecord[]>([]);
+  const [pagination, setPagination] = useState<PaginationData>({
+    total: 0,
+    pages: 0,
+    page: 1,
+    limit: 10,
+  });
+  const [search, setSearch] = useState("");
+  const [recordType, setRecordType] = useState("");
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [filterType, setFilterType] = useState<string | null>(null);
-  const [selectedRecord, setSelectedRecord] = useState<MedicalRecord | null>(null);
-  const [expandedRecords, setExpandedRecords] = useState<string[]>([]);
 
-  // Verify authenticated user and log access
   useEffect(() => {
-    if (status === "unauthenticated") {
+    if (!session?.user) {
       router.push("/login");
       return;
     }
 
-    // Check if user is a patient
-    if (session?.user.role !== "PATIENT") {
-      router.push("/dashboard"); // Redirect to appropriate dashboard
-      return;
-    }
+    fetchRecords();
+  }, [session, router, pagination.page, search, recordType]);
 
-    const initMedicalRecords = async () => {
-      try {
-        if (session?.user.id && session?.user.patientId) {
-          // Log medical records access
-          await logMedicalRecordAccess({
-            userId: session.user.id,
-            patientId: session.user.patientId,
-            sessionId: session.sessionId,
-            ipAddress: headers().get('x-real-ip') || headers().get('x-forwarded-for'),
-            userAgent: headers().get('user-agent'),
-          });
-        }
-      } catch (error) {
-        console.error('Failed to initialize medical records:', error);
-        setError('Access denied. Please contact support if you believe this is an error.');
-        return;
+  const fetchRecords = async () => {
+    try {
+      const searchParams = new URLSearchParams({
+        page: pagination.page.toString(),
+        limit: pagination.limit.toString(),
+        ...(search && { search }),
+        ...(recordType && { type: recordType }),
+      });
+
+      const response = await fetch(`/api/medical-records?${searchParams}`);
+      if (!response.ok) {
+        throw new Error("Failed to fetch medical records");
       }
-    };
 
-    initMedicalRecords();
-  }, [session, status, router]);
-
-  // Fetch medical records with audit logging
-  useEffect(() => {
-    if (session?.user.patientId && !error) {
-      setLoading(true);
-      
-      const fetchRecords = async () => {
-        try {
-          // In a real implementation, you would fetch this data from your API
-          // For now, we'll use mock data
-          const mockRecords: MedicalRecord[] = [
-            // ... existing mock data ...
-          ];
-
-          setRecords(mockRecords);
+      const data = await response.json();
+      setRecords(data.records);
+      setPagination(data.pagination);
         } catch (error) {
-          console.error('Failed to fetch medical records:', error);
-          setError('Failed to load medical records. Please try again later.');
+      console.error("Error fetching medical records:", error);
+      toast.error("Failed to load medical records");
         } finally {
           setLoading(false);
         }
       };
 
-      fetchRecords();
-    }
-  }, [session, error]);
-
-  // Handle search with audit logging
-  const handleSearch = useCallback(async (term: string) => {
-    setSearchTerm(term);
-    
-    if (session?.user.id && session?.user.patientId) {
-      try {
-        await logMedicalRecordSearch({
-          userId: session.user.id,
-          patientId: session.user.patientId,
-          sessionId: session.sessionId,
-          ipAddress: headers().get('x-real-ip') || headers().get('x-forwarded-for'),
-          userAgent: headers().get('user-agent'),
-        }, term, filterType || undefined);
-      } catch (error) {
-        console.error('Failed to log search:', error);
-      }
-    }
-  }, [session, filterType]);
-
-  // Handle filter with audit logging
-  const handleFilter = useCallback(async (type: string | null) => {
-    setFilterType(type);
-    
-    if (session?.user.id && session?.user.patientId) {
-      try {
-        await logMedicalRecordSearch({
-          userId: session.user.id,
-          patientId: session.user.patientId,
-          sessionId: session.sessionId,
-          ipAddress: headers().get('x-real-ip') || headers().get('x-forwarded-for'),
-          userAgent: headers().get('user-agent'),
-        }, searchTerm, type || undefined);
-      } catch (error) {
-        console.error('Failed to log filter:', error);
-      }
-    }
-  }, [session, searchTerm]);
-
-  // Handle download with audit logging
-  const handleDownload = async (attachment: Attachment) => {
-    if (session?.user.id && session?.user.patientId) {
-      try {
-        await logAttachmentDownload({
-          userId: session.user.id,
-          patientId: session.user.patientId,
-          recordId: selectedRecord?.id,
-          sessionId: session.sessionId,
-          ipAddress: headers().get('x-real-ip') || headers().get('x-forwarded-for'),
-          userAgent: headers().get('user-agent'),
-        }, attachment.id, attachment.fileName);
-        
-        // In a real implementation, this would trigger a download
-        toast.success(`Downloaded ${attachment.fileName}`);
-      } catch (error) {
-        console.error('Failed to log download:', error);
-        toast.error('Failed to download file. Please try again.');
-      }
-    }
+  const handleSearch = (value: string) => {
+    setSearch(value);
+    setPagination((prev) => ({ ...prev, page: 1 }));
   };
 
-  // Handle record view with audit logging
-  const handleViewRecord = async (record: MedicalRecord) => {
-    if (session?.user.id && session?.user.patientId) {
-      try {
-        await logMedicalRecordAccess({
-          userId: session.user.id,
-          patientId: session.user.patientId,
-          recordId: record.id,
-          sessionId: session.sessionId,
-          ipAddress: headers().get('x-real-ip') || headers().get('x-forwarded-for'),
-          userAgent: headers().get('user-agent'),
-        });
-        
-        setSelectedRecord(record);
-      } catch (error) {
-        console.error('Failed to log record view:', error);
-        toast.error('Failed to access record. Please try again.');
-      }
-    }
+  const handleTypeChange = (value: string) => {
+    setRecordType(value);
+    setPagination((prev) => ({ ...prev, page: 1 }));
   };
 
-  // ... existing loading state code ...
+  const handlePageChange = (page: number) => {
+    setPagination((prev) => ({ ...prev, page }));
+  };
 
   return (
-    <div className="container mx-auto py-6">
-      {/* ... existing header code ... */}
-
-      {/* Search and filter with audit logging */}
-      <div className="flex flex-col md:flex-row gap-4 mb-6">
-        <div className="relative flex-grow">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
-          <Input
-            placeholder="Search records..."
-            className="pl-10"
-            value={searchTerm}
-            onChange={(e) => handleSearch(e.target.value)}
-          />
-        </div>
-        
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" className="flex items-center gap-2">
-              <Filter size={16} />
-              {filterType || "Filter by type"}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
-            <DropdownMenuItem onClick={() => handleFilter(null)}>
-              All Records
-            </DropdownMenuItem>
-            {recordTypes.map((type) => (
-              <DropdownMenuItem key={type} onClick={() => handleFilter(type)}>
-                {type}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold">Medical Records</h1>
+        {session?.user.role === "DOCTOR" && (
+          <Button asChild>
+            <Link href="/medical-records/new">
+              <Plus className="mr-2 h-4 w-4" />
+              Add Record
+            </Link>
+          </Button>
+        )}
       </div>
 
-      {/* ... rest of the existing code ... */}
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col space-y-4 md:flex-row md:items-center md:space-x-4 md:space-y-0">
+            <div className="flex items-center space-x-2">
+              <Search className="h-5 w-5 text-gray-500" />
+          <Input
+            placeholder="Search records..."
+                value={search}
+            onChange={(e) => handleSearch(e.target.value)}
+                className="max-w-sm"
+          />
+        </div>
+            <Select
+              value={recordType}
+              onValueChange={handleTypeChange}
+            >
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="Record Type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All Types</SelectItem>
+                <SelectItem value="CONSULTATION">Consultation</SelectItem>
+                <SelectItem value="DIAGNOSIS">Diagnosis</SelectItem>
+                <SelectItem value="TREATMENT">Treatment</SelectItem>
+                <SelectItem value="PRESCRIPTION">Prescription</SelectItem>
+                <SelectItem value="LAB_RESULT">Lab Result</SelectItem>
+                <SelectItem value="IMAGING">Imaging</SelectItem>
+                <SelectItem value="SURGERY">Surgery</SelectItem>
+                <SelectItem value="FOLLOW_UP">Follow-up</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div>Loading...</div>
+          ) : (
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Patient</TableHead>
+                    <TableHead>Doctor</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {records.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center">
+                        No medical records found
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    records.map((record) => (
+                      <TableRow key={record.id}>
+                        <TableCell>
+                          {format(new Date(record.date), "PPP")}
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{record.patient.name}</p>
+                            <p className="text-sm text-gray-500">
+                              DOB: {format(new Date(record.patient.dateOfBirth), "PP")}
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <p>{record.doctor.name}</p>
+                            <p className="text-sm text-gray-500">
+                              {record.doctor.specialization.replace(/_/g, " ")}
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {record.type.replace(/_/g, " ")}
+                        </TableCell>
+                        <TableCell>
+                          <p className="truncate max-w-xs">
+                            {record.description}
+                          </p>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            asChild
+                          >
+                            <Link href={`/medical-records/${record.id}`}>
+                              View Details
+                            </Link>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+
+              {pagination.pages > 1 && (
+                <div className="mt-4 flex justify-center">
+                  <Pagination>
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          href="#"
+                          onClick={() => handlePageChange(pagination.page - 1)}
+                          isActive={pagination.page > 1}
+                        />
+                      </PaginationItem>
+                      {Array.from({ length: pagination.pages }, (_, i) => (
+                        <PaginationItem key={i + 1}>
+                          <PaginationLink
+                            href="#"
+                            onClick={() => handlePageChange(i + 1)}
+                            isActive={pagination.page === i + 1}
+                          >
+                            {i + 1}
+                          </PaginationLink>
+                        </PaginationItem>
+                      ))}
+                      <PaginationItem>
+                        <PaginationNext
+                          href="#"
+                          onClick={() => handlePageChange(pagination.page + 1)}
+                          isActive={pagination.page < pagination.pages}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+      </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
