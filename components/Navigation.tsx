@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { MessageSquare } from 'lucide-react'
 
 export default function Navigation() {
   const pathname = usePathname()
@@ -10,7 +11,7 @@ export default function Navigation() {
     <nav className="bg-gray-800 p-4">
       <div className="max-w-7xl mx-auto flex items-center justify-between">
         <Link href="/" className="text-white font-bold text-xl">
-          Roofing Tracker
+          HealthcareSync
         </Link>
         <div className="hidden md:flex space-x-4">
           <Link
@@ -22,28 +23,29 @@ export default function Navigation() {
             Dashboard
           </Link>
           <Link
-            href="/projects"
+            href="/patients"
             className={`px-3 py-2 rounded-md text-sm font-medium ${
-              pathname === '/projects' ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+              pathname === '/patients' ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
             }`}
           >
-            Projects
+            Patients
           </Link>
           <Link
-            href="/clients"
+            href="/appointments"
             className={`px-3 py-2 rounded-md text-sm font-medium ${
-              pathname === '/clients' ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+              pathname === '/appointments' ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
             }`}
           >
-            Clients
+            Appointments
           </Link>
           <Link
-            href="/estimates"
-            className={`px-3 py-2 rounded-md text-sm font-medium ${
-              pathname === '/estimates' ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+            href="/messages"
+            className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1 ${
+              pathname === '/messages' ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
             }`}
           >
-            Estimates
+            <MessageSquare size={16} />
+            Messages
           </Link>
         </div>
       </div>

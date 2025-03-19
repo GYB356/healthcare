@@ -1,10 +1,9 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
-import { Toaster } from 'react-toastify';
 import { AuthProvider } from '@/contexts/AuthContext';
-import 'react-toastify/dist/ReactToastify.css';
 import '@/styles/globals.css';
-import Navigation from '../components/Navigation'
+import Navigation from '../components/Navigation';
+import Providers from './providers';
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -22,11 +21,12 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <AuthProvider>
-          <Navigation />
-          <main className="min-h-screen p-4 md:p-8">
-            {children}
-          </main>
-          <Toaster />
+          <Providers>
+            <Navigation />
+            <main className="min-h-screen p-4 md:p-8">
+              {children}
+            </main>
+          </Providers>
         </AuthProvider>
       </body>
     </html>

@@ -36,6 +36,7 @@ export interface AuditOptions {
   severity?: AuditSeverity;
   status?: AuditStatus;
   sessionId?: string;
+  timestamp?: Date;
 }
 
 interface EncryptedData {
@@ -71,7 +72,7 @@ export async function createAuditLog(options: AuditOptions): Promise<AuditLog> {
       }
     }
 
-    const timestamp = new Date();
+    const timestamp = options.timestamp || new Date();
     
     // Generate integrity hash for the log entry
     const logData = {
@@ -479,4 +480,40 @@ export async function createHIPAABackup() {
     
     throw new Error('Failed to create HIPAA backup');
   }
+}
+
+/**
+ * Check if user has access to view a conversation
+ * This is a simplified mock implementation
+ */
+export async function verifyConversationAccess(
+  userId: string, 
+  conversationId: string
+): Promise<boolean> {
+  // In production, this would check the database to ensure the user
+  // is a participant in the conversation
+  console.log(`Checking if user ${userId} has access to conversation ${conversationId}`);
+  
+  // For development, we'll just return true
+  return true;
+}
+
+/**
+ * Encrypt sensitive PHI data (HIPAA requirement)
+ * This is a simplified mock implementation
+ */
+export async function encryptPHI(data: string): Promise<string> {
+  // In production, this would use proper encryption
+  // For development, we'll just return the original data
+  return `[ENCRYPTED]${data}`;
+}
+
+/**
+ * Decrypt sensitive PHI data
+ * This is a simplified mock implementation
+ */
+export async function decryptPHI(encryptedData: string): Promise<string> {
+  // In production, this would use proper decryption
+  // For development, we'll just return the data without the [ENCRYPTED] prefix
+  return encryptedData.replace('[ENCRYPTED]', '');
 }
