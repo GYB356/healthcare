@@ -17,7 +17,7 @@ The following components have been created:
 
 2. **Frontend**:
    - `frontend/components/ReportViewer.tsx`: Component for displaying reports
-   - `frontend/pages/appointments/[appointmentId]/reports.tsx`: Page for viewing reports associated with an appointment
+   - `frontend/pages/appointments/[id]/reports.tsx`: Page for viewing reports associated with an appointment
 
 ## Integration Steps
 
@@ -61,7 +61,7 @@ The following components have been created:
    // In _app.tsx or your auth protection logic
    const protectedRoutes = [
      // ... existing routes
-     "/appointments/[appointmentId]/reports"
+     "/appointments/[id]/reports"
    ];
    ```
 
